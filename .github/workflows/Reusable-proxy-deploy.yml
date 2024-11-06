@@ -102,28 +102,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug Identity Configuration
-        run: |
-          echo "GitHub Repository: ${{ github.repository }}"
-          echo "GitHub Actor: ${{ github.actor }}"
-          echo "GitHub Ref: ${{ github.ref }}"
-          echo "Workload Identity Provider: ${{ secrets.workload_identity_provider }}"
-
       - name: Authenticate to Google Cloud
         id: auth
-        uses: 'google-github-actions/auth@v2'
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.workload_identity_provider }}
           service_account: ${{ secrets.service_account }}
           token_format: 'access_token'
-          cleanup_credentials: true
-          create_credentials_file: false
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
 
       - name: Get Access Token
         id: get-token
         run: |
-          TOKEN=$(gcloud auth print-access-token)
-          echo "token=${TOKEN}" >> $GITHUB_OUTPUT
+          echo "::add-mask::$(gcloud auth print-access-token)"
+          echo "token=$(gcloud auth print-access-token)" >> $GITHUB_OUTPUT
+
+      - name: Verify Token
+        if: success()
+        run: |
+          if [ -n "${{ steps.get-token.outputs.token }}" ]; then
+            echo "Access token successfully obtained"
+          else
+            echo "Failed to obtain access token"
+            exit 1
+          fi
 
   ApigeeLint:
     needs: [GCP_Auth]
