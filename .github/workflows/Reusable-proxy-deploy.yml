@@ -1,0 +1,264 @@
+name: Reusable Apigee Proxy Deployment
+
+# This workflow is designed to be reusable across different repositories
+on:
+  workflow_call:
+    # Define inputs that can be passed when calling this workflow
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      proxy_directory:
+        description: Working directory to zip up as your proxy bundle
+        required: false
+        type: string
+        default: 'apiproxy'
+      dev_env:
+        description: The name of the development environment
+        required: true
+        type: string
+      test_env:
+        description: The name of the testing environment
+        required: true
+        type: string
+      uat_env:
+        description: The name of the UAT environment
+        required: true
+        type: string
+      runner:
+        description: The runner to use for the job
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+      repository:
+        description: 'The repository to checkout'
+        required: false
+        type: string
+        default: ${{ github.repository }}
+    # Define secrets that need to be passed
+    secrets:
+      apigee_org:
+        required: true
+      service_account:
+        required: true
+      workload_identity_provider:
+        required: true
+
+jobs:
+  Deploy_Apigee_Proxy:
+    name: "Deploy API"
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      id-token: write
+    # Set environment variables for the job
+    env:
+      APIGEE_ORG: ${{ secrets.apigee_org }}
+      APIGEE_PROXY_NAME: ${{ inputs.proxy_name }}
+      APIGEE_DEV_ENV: ${{ inputs.dev_env }}
+      APIGEE_TEST_ENV: ${{ inputs.test_env }}
+      APIGEE_UAT_ENV: ${{ inputs.uat_env }}
+
+    steps:
+      # Step 1: Checkout the code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+
+      # Step 2: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.workload_identity_provider }}
+          service_account: ${{ secrets.service_account }}
+
+      # Step 3: Set up Google Cloud SDK
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      # Step 4: Install Node.js
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      # Step 5: Cache node modules for faster builds
+      - name: Cache node modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.OS }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.OS }}-node-
+
+      # Step 6: Install jq for JSON processing
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      # Step 7: Install apigeelint for linting Apigee proxies
+      - name: Install apigeelint
+        run: npm install -g apigeelint@2.16.0
+
+      # Step 8: Run apigeelint and save results
+      - name: Run apigeelint
+        run: |
+          apigeelint -s ${{ inputs.proxy_directory }} -f json -w linting-results.json
+
+
+      # Step 9: Save detailed linting results as an artifact
+      - name: Save detailed linting results
+        uses: actions/upload-artifact@v3
+        with:
+          name: detailed-linting-results
+          path: linting-results.json
+
+      # Step 10: Display currently deployed proxies and their revisions
+      - name: Display Deployed Proxies and Revisions
+        run: |
+          echo "Fetching deployed proxies and their revisions..."
+          ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
+          
+          deployments=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/environments/$APIGEE_DEV_ENV/deployments" \
+            | jq -r '.deployments[] | {proxy: .apiProxy, revision: .revision}')
+
+          echo -e "\n## Deployed Proxies and Revisions"
+          echo "| Proxy Name | Revision |"
+          echo "|------------|----------|"
+          echo "$deployments" | jq -r '. | "\(.proxy) | \(.revision)"' | while IFS= read -r line; do
+            echo "| $line |"
+          done
+
+      # Step 11: Delete older revisions, keeping only the last 3
+      - name: Delete Older Revisions (Keep Last 3)
+        run: |
+          echo "Starting deletion of older revisions for proxy: $APIGEE_PROXY_NAME (Keeping last 3)"
+
+          # Install jq if not already installed
+          sudo apt-get install -y jq
+
+          # Authenticate and get access token
+          ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
+
+          # Fetch all revisions and sort numerically
+          revisions=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions" | \
+            jq -r '.[]' | sort -n)
+
+          # Exit early if there are 3 or fewer revisions
+          revision_count=$(echo "$revisions" | wc -l)
+          [ "$revision_count" -le 3 ] && echo "Only $revision_count revisions found. No need to delete any." && exit 0
+
+          # Get the currently deployed revision in the environment
+          current_revision=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/environments/$APIGEE_DEV_ENV/deployments" | \
+            jq -r --arg PROXY "$APIGEE_PROXY_NAME" '.deployments[] | select(.apiProxy == $PROXY) | .revision')
+
+          # Ensure current revision is included in the last 3 revisions
+          revisions_to_keep=$(echo "$revisions" | tail -n 3 | grep -v "^$current_revision$" || true)
+          revisions_to_keep="$revisions_to_keep"$'\n'"$current_revision"  # Include current revision
+          revisions_to_delete=$(echo "$revisions" | grep -v -F "$revisions_to_keep")
+
+          # Display Revisions Table Header
+          echo -e "\n### Revisions Table\n"
+          echo "| Revision | Status       | Delete Status        |"
+          echo "|----------|--------------|---------------------|"
+
+          # Display revisions to keep in the table
+          for rev in $(echo "$revisions_to_keep" | sort -n); do
+            echo "| $rev      | Retained     | N/A                 |"
+          done
+
+          # Delete older revisions and capture the results
+          for rev in $revisions_to_delete; do
+            response_code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions/$rev")
+
+            if [ "$response_code" -eq 200 ]; then
+              echo "| $rev      | Deleted      | Successfully deleted |"
+            else
+              echo "| $rev      | Deleted      | Failed with status $response_code |"
+            fi
+          done
+
+          echo -e "\nOlder revisions cleanup completed."
+
+      # Step 12: Create API bundle
+      - name: Create API bundle
+        run: zip -r proxy.zip ${{ inputs.proxy_directory }}
+
+      # Step 13: Upload API Proxy Bundle
+      - name: Upload API Proxy Bundle
+        id: upload
+        run: |
+          ACCESS_TOKEN=$(gcloud auth application-default print-access-token)
+          current_revision=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/environments/$APIGEE_DEV_ENV/deployments" | \
+            jq -r --arg PROXY "$APIGEE_PROXY_NAME" '.deployments[] | select(.apiProxy == $PROXY) | .revision')
+
+          echo "Current deployed revision: $current_revision"
+          echo "current-revision=$current_revision" >> $GITHUB_OUTPUT
+
+          response=$(curl --fail -X POST \
+            -H "Content-Type: multipart/form-data" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -F "file=@proxy.zip" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis?action=import&name=$APIGEE_PROXY_NAME" \
+            --silent)
+
+          revision=$(echo "$response" | jq --raw-output .revision)
+          echo "Uploaded Proxy Revision: $revision"
+          echo "apigee-revision=$revision" >> $GITHUB_OUTPUT
+
+      # Step 14: Deploy and Validate in Dev Environment
+      - name: Deploy and Validate in Dev Environment
+        id: deploy
+        run: |
+          echo "Deploying to Development Environment: ${{ inputs.dev_env }}"
+          curl -X POST \
+          -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+          "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/environments/$APIGEE_DEV_ENV/apis/$APIGEE_PROXY_NAME/revisions/${{ steps.upload.outputs.apigee-revision }}/deployments?override=true"
+
+          # Wait for deployment to complete and validate
+          sleep 30
+          retries=0
+          while [[ $retries -lt 5 ]]; do
+            state=$(curl -s -X GET \
+              -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/environments/$APIGEE_DEV_ENV/apis/$APIGEE_PROXY_NAME/revisions/${{ steps.upload.outputs.apigee-revision }}/deployments" \
+              | jq -r '.state')
+
+            if [ "$state" == "READY" ]; then
+              echo "Deployment successful and validated!"
+              echo "deployment-state=$state" >> $GITHUB_OUTPUT
+              break
+            fi
+
+            sleep 30
+            retries=$((retries+1))
+          done
+
+          if [ "$state" != "READY" ]; then
+            echo "Deployment validation failed!"
+            echo "deployment-state=FAILED" >> $GITHUB_OUTPUT
+            exit 1
+          fi  
+
+      # Step 15: Generate Deployment Summary
+      - name: Generate Deployment Summary
+        run: |
+          LINT_ERRORS=$(jq '[.[] | select(.severity == "Error")] | length' linting-results.json)
+          LINT_WARNINGS=$(jq '[.[] | select(.severity == "Warning")] | length' linting-results.json)
+
+          echo "| Step                | Result           | Details |"
+          echo "|---------------------|------------------|---------|"
+          echo "| Linting Analysis    | Errors: $LINT_ERRORS |         |"
+          echo "| Linting Analysis    | Warnings: $LINT_WARNINGS |       |"
+          echo "| Proxy Deployment    | ${{ steps.deploy.outputs.deployment-state }} | Validated |"
+
+          echo -e "\n## Deployment Version Information"
+          echo "| Proxy Name | Old Version | New Version | Status |"
+          echo "|------------|-------------|-------------|--------|"
+          echo "| ${{ inputs.proxy_name }} | ${{ steps.upload.outputs.current-revision }} | ${{ steps.upload.outputs.apigee-revision }} | ${{ steps.deploy.outputs.deployment-state }} |"
