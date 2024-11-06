@@ -32,8 +32,7 @@ on:
         required: true
       service_account:
         required: true
-      api_key:
-        required: true
+      
 
 permissions:
   contents: read
@@ -103,11 +102,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug Auth Inputs
+      - name: Debug Identity Configuration
         run: |
-          echo "Checking authentication inputs..."
-          echo "Workload Identity Provider is configured: ${{ secrets.workload_identity_provider != '' }}"
-          echo "Service Account is configured: ${{ secrets.service_account != '' }}"
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "GitHub Actor: ${{ github.actor }}"
+          echo "GitHub Ref: ${{ github.ref }}"
+          echo "Workload Identity Provider: ${{ secrets.workload_identity_provider }}"
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -115,11 +115,9 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.workload_identity_provider }}
           service_account: ${{ secrets.service_account }}
-          project_id: ${{ secrets.PROJECT_ID }}
-          create_credentials_file: true
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+          token_format: 'access_token'
+          cleanup_credentials: true
+          create_credentials_file: false
 
       - name: Get Access Token
         id: get-token
