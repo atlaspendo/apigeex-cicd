@@ -100,11 +100,14 @@ jobs:
     outputs:
       access_token: ${{ steps.get-token.outputs.token }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Debug Auth Inputs
         run: |
           echo "Checking authentication inputs..."
-          echo "Workload Identity Provider is set: ${{ secrets.workload_identity_provider != '' }}"
-          echo "Service Account is set: ${{ secrets.service_account != '' }}"
+          echo "Workload Identity Provider is configured: ${{ secrets.workload_identity_provider != '' }}"
+          echo "Service Account is configured: ${{ secrets.service_account != '' }}"
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -112,6 +115,8 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.workload_identity_provider }}
           service_account: ${{ secrets.service_account }}
+          project_id: ${{ secrets.PROJECT_ID }}
+          create_credentials_file: true
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
