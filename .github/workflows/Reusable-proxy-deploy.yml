@@ -273,41 +273,56 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Generate Deployment Summary
+        shell: bash
         run: |
-          # Convert environments array to string
-          ENVIRONMENTS=$(echo '${{ needs.Prepare_Environment_List.outputs.environments }}' | tr -d '[]"')
+          echo "# 🚀 Apigee Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Pipeline Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|---------|" >> $GITHUB_STEP_SUMMARY
           
-          cat << EOF >> $GITHUB_STEP_SUMMARY
-          # 🚀 Apigee Deployment Summary
-
-          ## 📊 Pipeline Status
-          | Stage | Status | Details |
-          |-------|--------|---------|
-          | 🔐 Authentication | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | GCP Workload Identity |
-          | 🔍 Linting | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | API Proxy Validation |
-          | 📦 Upload | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }} |
-          | 🚀 Deployment | $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Status by Environment |
-
-          ## 📋 Deployment Details
-          - **Proxy Name:** ${{ inputs.proxy_name }}
-          - **Version:** ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
-          - **Timestamp:** $(date)
-          - **Target Environments:** ${ENVIRONMENTS}
-
-          ## 🌍 Environment Status
-          $(for env in $(echo ${ENVIRONMENTS} | tr ',' ' '); do
-            echo "- **${env}:** $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Deployed" || echo "❌ Failed")"
-          done)
-
-          ## 📝 Summary
-          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+          # Authentication Status
+          echo "| 🔐 Authentication | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | GCP Workload Identity |" >> $GITHUB_STEP_SUMMARY
+          
+          # Linting Status
+          echo "| 🔍 Linting | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | API Proxy Validation |" >> $GITHUB_STEP_SUMMARY
+          
+          # Upload Status
+          echo "| 📦 Upload | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Deployment Status
+          echo "| 🚀 Deployment | $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Status by Environment |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Proxy Name:** ${{ inputs.proxy_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.Prepare_and_Upload.outputs.latest_revision }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment Group:** ${{ inputs.environment_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment Types:** ${{ inputs.environment_type }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🌍 Environment Status" >> $GITHUB_STEP_SUMMARY
+          
+          # Process environment types
+          IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
+          for env in "${ENVS[@]}"; do
+            if [ "${{ inputs.environment_group }}" == "default" ]; then
+              ENV_NAME="${env}"
+            else
+              ENV_NAME="${{ inputs.environment_group }}-${env}"
+            fi
+            echo "- **${ENV_NAME}:** $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Deployed" || echo "❌ Failed")" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📝 Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
              [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
              [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "✨ **Deployment Completed Successfully!**"
+            echo "✨ **Deployment Completed Successfully!**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⚠️ **Deployment Encountered Issues - Check Details Above**"
-          fi)
-          EOF
-          </div>
-          EOF
+            echo "⚠️ **Deployment Encountered Issues - Check Details Above**" >> $GITHUB_STEP_SUMMARY
+          fi
