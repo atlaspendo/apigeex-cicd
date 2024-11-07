@@ -78,8 +78,8 @@ jobs:
           ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
           echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
 
-  Setup_GCP_Authentication [WIF]:
-    needs: [Prepare_Environment_List]
+  Setup_GCP_Authentication:
+    needs: [Initialize_Environment_Configuration]
     runs-on: ${{ inputs.runner }}
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
@@ -92,8 +92,8 @@ jobs:
           service_account: ${{ secrets.service_account }}
           token_format: 'access_token'
 
-  Validate_API_Proxy [ApigeeLint]:
-    needs: [GCP_Auth]
+  Validate_API_Proxy-ApigeeLint:
+    needs: [Setup_GCP_Authentication]
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout code
@@ -111,7 +111,7 @@ jobs:
         run: apigeelint -s ${{ inputs.proxy_directory }} -f table.js
 
   Build_And_Upload_Proxy:
-    needs: [GCP_Auth, ApigeeLint]
+    needs: [Setup_GCP_Authentication, Validate_API_Proxy-ApigeeLint]
     runs-on: ${{ inputs.runner }}
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
@@ -185,7 +185,7 @@ jobs:
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_Proxy_To_Environment:
-    needs: [Prepare_Environment_List, GCP_Auth, Prepare_and_Upload]
+    needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
         environment: ${{ fromJSON(needs.Prepare_Environment_List.outputs.environments) }}
@@ -233,7 +233,7 @@ jobs:
             --wait
 
   Perform_Revision_Cleanup:
-    needs: [Deploy_to_Environment]
+    needs: [Build_And_Upload_Proxy]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
@@ -269,7 +269,7 @@ jobs:
 
 
   Generate_Deployment_Report:
-    needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
+    needs: [Validate_API_Proxy-ApigeeLint, Build_And_Upload_Proxy, Initialize_Environment_Configuration, Perform_Revision_Cleanup]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
