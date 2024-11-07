@@ -87,7 +87,7 @@ jobs:
     needs: [Prepare_Environment_List]
     runs-on: ${{ inputs.runner }}
     outputs:
-      access_token: ${{ steps.auth.outputs.access_token }}
+      token: ${{ steps.get-token.outputs.token }}
     steps:
       - name: Authenticate to Google Cloud
         id: auth
@@ -95,19 +95,27 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.workload_identity_provider }}
           service_account: ${{ secrets.service_account }}
-          token_format: 'access_token'
           create_credentials_file: true
-          access_token_lifetime: '3600s'
+          token_format: 'access_token'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Get and Store Access Token
+      - name: Get Access Token
+        id: get-token
         run: |
           TOKEN=$(gcloud auth print-access-token)
           echo "::add-mask::$TOKEN"
-          echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
+      - name: Verify Token
+        run: |
+          if [ -n "${{ steps.get-token.outputs.token }}" ]; then
+            echo "Access token successfully generated"
+          else
+            echo "Failed to generate access token"
+            exit 1
+          fi
   ApigeeLint:
     needs: [GCP_Auth]
     runs-on: ${{ inputs.runner }}
