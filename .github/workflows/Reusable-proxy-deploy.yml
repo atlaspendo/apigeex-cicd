@@ -233,7 +233,7 @@ jobs:
             --wait
 
   Perform_Revision_Cleanup:
-    needs: [Build_And_Upload_Proxy]
+    needs: [Deploy_Proxy_To_Environment]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
