@@ -268,7 +268,7 @@ jobs:
           fi
 
 
-  Deployment_Summary:
+   Deployment_Summary:
     needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
     if: always()
     runs-on: ${{ inputs.runner }}
@@ -276,11 +276,14 @@ jobs:
       - name: Generate Visual Summary
         run: |
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          # 📦 Apigee Proxy Deployment Status
+          # 🚀 Apigee Proxy Deployment Summary
 
-          **Deployment Time:** $(date '+%d/%m/%Y, %H:%M:%S')
+          <small>
+          **Deployment Date:** $(date '+%d/%m/%Y, %H:%M:%S')  
+          **Run ID:** \`${{ github.run_id }}\`
+          </small>
 
-          ## Deployment Pipeline Overview
+          ## 📈 Deployment Pipeline Overview
 
           ```mermaid
           graph TD;
@@ -292,15 +295,15 @@ jobs:
               F --> G[Deployment Summary];
           ```
 
-          ## Deployment Details
+          ## 📝 Details of Deployment
 
-          | Detail | Value |
-          |--------|-------|
-          | **PROXY NAME** | \`${{ inputs.proxy_name }}\` |
-          | **REVISION** | \`${{ needs.Prepare_and_Upload.outputs.latest_revision }}\` |
-          | **GROUP** | \`${{ inputs.environment_group }}\` |
+          | <small>**Detail**</small> | <small>**Value**</small> |
+          |---------------------------|---------------------------|
+          | <small>**PROXY NAME**</small> | <small>\`${{ inputs.proxy_name }}\`</small> |
+          | <small>**REVISION**</small> | <small>\`${{ needs.Prepare_and_Upload.outputs.latest_revision }}\`</small> |
+          | <small>**GROUP**</small> | <small>\`${{ inputs.environment_group }}\`</small> |
 
-          ## 🌐 Environment Status
+          ## 🌐 <small>Environment Status</small>
 
           $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
             if [ "${{ inputs.environment_group }}" == "default" ]; then
@@ -310,48 +313,47 @@ jobs:
             fi
             if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
               echo "### ${ENV_NAME}"
-              echo "✅ **ACTIVE**"
+              echo "✅ <small>**ACTIVE**</small>"
             else
               echo "### ${ENV_NAME}"
-              echo "❌ **INACTIVE**"
+              echo "❌ <small>**INACTIVE**</small>"
             fi
           done)
 
-          ## 📊 Pipeline Results
+          ## 📊 <small>Pipeline Step Results</small>
 
-          ### 🔐 AUTHENTICATION
-          **Workload Identity**
-          $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ **Successful**" || echo "❌ **Failed**")
+          ### 🔐 <small>Authentication</small>
+          - **Workload Identity**: $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ **Successful**" || echo "❌ **Failed**")
 
-          ### 🔍 CODE QUALITY
-          **API Validation**
-          $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ **Passed**" || echo "❌ **Failed**")
+          ### 🔍 <small>Code Quality Check</small>
+          - **API Linting**: $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ **Passed**" || echo "❌ **Failed**")
 
-          ### 📦 BUNDLE
-          **Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}**
-          $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ **Uploaded**" || echo "❌ **Failed**")
+          ### 📦 <small>Bundle Preparation</small>
+          - **Latest Revision**: \`${{ needs.Prepare_and_Upload.outputs.latest_revision }}\`  
+          - **Status**: $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ **Uploaded Successfully**" || echo "❌ **Upload Failed**")
 
-          ### 🚀 DEPLOYMENT
-          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-            echo "✅ **Deployed**"
-            echo "**Status:** Successfully deployed to all environments"
-          else
-            echo "❌ **Failed**"
-            echo "**Status:** Deployment encountered issues"
-          fi)
+          ### 🚀 <small>Deployment to Environments</small>
+          - $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+              echo "✅ **All Environments Deployed Successfully**"
+            else
+              echo "❌ **Deployment Failed**"
+            fi)
 
-          ## Final Status Summary
+          ## 🔄 <small>Cleanup Status</small>
+          - **Old Revisions Cleanup**: $([ "${{ needs.Cleanup_Old_Revisions.result }}" == "success" ] && echo "✅ **Completed**" || echo "⚠️ **Not Completed**")
+
+          ## ✅ Final Status Summary
 
           $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
              [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
              [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "# ✨ Deployment Successfully Completed"
+            echo "# 🎉 <small>**Deployment Successfully Completed**</small>"
           else
-            echo "# ⚠️ Deployment Issues Detected"
+            echo "# ⚠️ <small>**Deployment Issues Detected**</small>"
           fi)
 
-          <sub>Run ID: \`${{ github.run_id }}\`</sub>
+          <small>**Deployment Run ID:** \`${{ github.run_id }}\`</small>
           EOF
 
       - name: Generate Detailed Log
@@ -405,3 +407,4 @@ jobs:
           name: deployment-summary
           path: deployment-details.log
           retention-days: 30
+
