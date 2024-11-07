@@ -272,76 +272,124 @@ jobs:
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Generate Summary
+      - name: Generate Enhanced Summary
         run: |
           TIMESTAMP=$(date '+%d/%m/%Y, %H:%M:%S')
           
           cat << EOF >> $GITHUB_STEP_SUMMARY
+          <div align="center">
+          
           # 🎯 Apigee Proxy Deployment Dashboard
           
           ### ⏱️ Deployment Time: $TIMESTAMP
           
-          <table>
+          </div>
+          
+          <table align="center">
             <tr>
-              <td><b>🔷 PROXY</b></td>
-              <td><code style="background-color: #0366d6; color: white; padding: 4px 8px; border-radius: 4px;">${{ inputs.proxy_name }}</code></td>
-              <td><b>📌 VERSION</b></td>
-              <td><code style="background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px;">${{ needs.Prepare_and_Upload.outputs.latest_revision }}</code></td>
-              <td><b>👥 GROUP</b></td>
-              <td><code style="background-color: #6f42c1; color: white; padding: 4px 8px; border-radius: 4px;">${{ inputs.environment_group }}</code></td>
+              <td align="center">
+                <h3>📦 PROXY</h3>
+                <code style="background-color: #0366d6; color: white; padding: 4px 8px; border-radius: 4px;">
+                  ${{ inputs.proxy_name }}
+                </code>
+              </td>
+              <td align="center">
+                <h3>🔢 VERSION</h3>
+                <code style="background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px;">
+                  ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+                </code>
+              </td>
+              <td align="center">
+                <h3>🔍 GROUP</h3>
+                <code style="background-color: #6f42c1; color: white; padding: 4px 8px; border-radius: 4px;">
+                  ${{ inputs.environment_group }}
+                </code>
+              </td>
             </tr>
           </table>
           
           ## 🌐 Environment Matrix
           
-          | Environment | Status | Health |
-          |:----------:|:------:|:-------:|
-          $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
-            if [ "${{ inputs.environment_group }}" == "default" ]; then
-              ENV_NAME="${env}"
-            else
-              ENV_NAME="${{ inputs.environment_group }}-${env}"
-            fi
-            if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-              echo "| \`${ENV_NAME}\` | ✅ DEPLOYED | ![Optimal](https://img.shields.io/badge/health-optimal-success?style=flat-square) |"
-            else
-              echo "| \`${ENV_NAME}\` | ❌ FAILED | ![Critical](https://img.shields.io/badge/health-critical-red?style=flat-square) |"
-            fi
-          done)
+          <table align="center">
+            <tr>
+              <th align="center">Environment</th>
+              <th align="center">Status</th>
+              <th align="center">Health</th>
+            </tr>
+            $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
+              if [ "${{ inputs.environment_group }}" == "default" ]; then
+                ENV_NAME="${env}"
+              else
+                ENV_NAME="${{ inputs.environment_group }}-${env}"
+              fi
+              if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+                echo "<tr>"
+                echo "<td align=\"center\"><code style=\"background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;\">${ENV_NAME}</code></td>"
+                echo "<td align=\"center\"><span style=\"color: #28a745; font-weight: bold;\">✅ DEPLOYED</span></td>"
+                echo "<td align=\"center\"><span style=\"background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px;\">OPTIMAL</span></td>"
+                echo "</tr>"
+              else
+                echo "<tr>"
+                echo "<td align=\"center\"><code style=\"background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;\">${ENV_NAME}</code></td>"
+                echo "<td align=\"center\"><span style=\"color: #cb2431; font-weight: bold;\">❌ FAILED</span></td>"
+                echo "<td align=\"center\"><span style=\"background-color: #cb2431; color: white; padding: 4px 8px; border-radius: 4px;\">CRITICAL</span></td>"
+                echo "</tr>"
+              fi
+            done)
+          </table>
           
           ## 📊 Pipeline Status
           
-          | Stage | Status | Details |
-          |:-----:|:------:|:-------:|
-          | Authentication | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅" || echo "❌") | Workload Identity Federation |
-          | Linting | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅" || echo "❌") | API Proxy Validation |
-          | Upload | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅" || echo "❌") | Bundle Upload (Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}) |
-          | Deployment | $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌") | Environment Deployment |
+          <table align="center">
+            <tr>
+              <th align="center">Stage</th>
+              <th align="center">Status</th>
+              <th align="center">Details</th>
+            </tr>
+            <tr>
+              <td align="center">🔐 Authentication</td>
+              <td align="center">$([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: bold;\">✅ SUCCESS</span>" || echo "<span style=\"color: #cb2431; font-weight: bold;\">❌ FAILED</span>")</td>
+              <td align="center"><code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">Workload Identity</code></td>
+            </tr>
+            <tr>
+              <td align="center">🔍 Linting</td>
+              <td align="center">$([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: bold;\">✅ SUCCESS</span>" || echo "<span style=\"color: #cb2431; font-weight: bold;\">❌ FAILED</span>")</td>
+              <td align="center"><code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">API Validation</code></td>
+            </tr>
+            <tr>
+              <td align="center">📦 Upload</td>
+              <td align="center">$([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: bold;\">✅ SUCCESS</span>" || echo "<span style=\"color: #cb2431; font-weight: bold;\">❌ FAILED</span>")</td>
+              <td align="center"><code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</code></td>
+            </tr>
+            <tr>
+              <td align="center">🚀 Deployment</td>
+              <td align="center">$([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: bold;\">✅ SUCCESS</span>" || echo "<span style=\"color: #cb2431; font-weight: bold;\">❌ FAILED</span>")</td>
+              <td align="center"><code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">Environment Deploy</code></td>
+            </tr>
+          </table>
           
-          ## 📈 Status Summary
+          ## 📈 Final Status
           
-          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
-             [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
-             [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
-             [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "### ✨ Deployment Successfully Completed"
-            echo ""
-            echo "- ✅ Authentication: Successful"
-            echo "- ✅ Code Quality: Passed"
-            echo "- ✅ Bundle Upload: Completed"
-            echo "- ✅ Deployment: Successful"
-          else
-            echo "### ⚠️ Deployment Issues Detected"
-            echo ""
-            echo "- $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅" || echo "❌") Authentication: ${{ needs.GCP_Auth.result }}"
-            echo "- $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅" || echo "❌") Code Quality: ${{ needs.ApigeeLint.result }}"
-            echo "- $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅" || echo "❌") Bundle Upload: ${{ needs.Prepare_and_Upload.result }}"
-            echo "- $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌") Deployment: ${{ needs.Deploy_to_Environment.result }}"
-          fi)
+          <div align="center" style="margin: 20px 0;">
+            $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+               [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+               [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+               [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
+              echo "<div style=\"background-color: #28a745; color: white; padding: 16px; border-radius: 8px; display: inline-block;\">"
+              echo "<h3 style=\"margin: 0;\">✨ Deployment Successfully Completed</h3>"
+              echo "</div>"
+            else
+              echo "<div style=\"background-color: #cb2431; color: white; padding: 16px; border-radius: 8px; display: inline-block;\">"
+              echo "<h3 style=\"margin: 0;\">⚠️ Deployment Issues Detected</h3>"
+              echo "</div>"
+            fi)
+          </div>
           
           ---
           
-          <div align="center">
-          <sub>Generated by GitHub Actions • Run ID: <code>${{ github.run_id }}</code></sub>
+          <div align="center" style="margin-top: 20px;">
+            <code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">
+              Run ID: ${{ github.run_id }}
+            </code>
           </div>
           EOF
