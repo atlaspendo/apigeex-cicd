@@ -117,16 +117,16 @@ jobs:
       - name: Get Access Token
         id: get-token
         run: |
-          echo "::add-mask::$(gcloud auth print-access-token)"
-          echo "token=$(gcloud auth print-access-token)" >> $GITHUB_OUTPUT
+          TOKEN=$(gcloud auth print-access-token)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
-      - name: Verify Token
-        if: success()
+      - name: Debug Token
         run: |
           if [ -n "${{ steps.get-token.outputs.token }}" ]; then
-            echo "Access token successfully obtained"
+            echo "Access token was successfully generated"
           else
-            echo "Failed to obtain access token"
+            echo "Failed to generate access token"
             exit 1
           fi
 
@@ -156,6 +156,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Debug Access Token
+        run: |
+          if [ -n "${{ needs.GCP_Auth.outputs.access_token }}" ]; then
+            echo "Access token is available"
+          else
+            echo "Access token is missing"
+            exit 1
+          fi
 
       - name: Install apigeecli
         run: |
@@ -194,12 +203,20 @@ jobs:
         env:
           APIGEE_ORG: ${{ secrets.apigee_org }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.GCP_Auth.outputs.access_token }}
         run: |
           echo "Importing API proxy bundle to Apigee organization"
-          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle -n "$PROXY_NAME" -p proxy.zip \
+          TOKEN="${{ needs.GCP_Auth.outputs.access_token }}"
+          
+          if [ -z "$TOKEN" ]; then
+            echo "Error: Access token is not available"
+            exit 1
+          fi
+          
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "$PROXY_NAME" \
+            -p proxy.zip \
             --org "$APIGEE_ORG" \
-            --token "$ACCESS_TOKEN")
+            --token "$TOKEN")
           
           echo "$IMPORT_OUTPUT"
           
