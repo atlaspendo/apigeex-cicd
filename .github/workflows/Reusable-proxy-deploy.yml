@@ -273,21 +273,22 @@ jobs:
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Generate Clean Summary
+      - name: Generate Visual Summary
         run: |
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          # <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnptMCAxOGMtNC40MSAwLTgtMy41OS04LThzMy41OS04IDgtOCA4IDMuNTkgOCA4LTMuNTkgOC04IDh6IiBmaWxsPSIjMDA3OEQ0Ii8+PC9zdmc+" width="24" height="24" style="vertical-align: middle;"> Apigee Proxy Deployment Status
+          # 📦 Apigee Proxy Deployment Status
 
           **Deployment Time:** $(date '+%d/%m/%Y, %H:%M:%S')
 
-          ### Deployment Details
+          ## Deployment Details
+
           | Detail | Value |
           |--------|-------|
           | **PROXY NAME** | \`${{ inputs.proxy_name }}\` |
           | **REVISION** | \`${{ needs.Prepare_and_Upload.outputs.latest_revision }}\` |
           | **GROUP** | \`${{ inputs.environment_group }}\` |
 
-          ### <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkM2LjQ4IDIgMiA2LjQ4IDIgMTJzNC40OCAxMCAxMCAxMCAxMC00LjQ4IDEwLTEwUzE3LjUyIDIgMTIgMnptMCAxOGMtNC40MSAwLTgtMy41OS04LThzMy41OS04IDgtOCA4IDMuNTkgOCA4LTMuNTkgOC04IDh6IiBmaWxsPSIjMDBCNEQxIi8+PC9zdmc+" width="20" height="20" style="vertical-align: middle;"> Environment Status
+          ## 🌐 Environment Status
 
           $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
             if [ "${{ inputs.environment_group }}" == "default" ]; then
@@ -296,48 +297,101 @@ jobs:
               ENV_NAME="${{ inputs.environment_group }}-${env}"
             fi
             if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-              echo "**${ENV_NAME}**  "
-              echo "✅ ACTIVE"
+              echo "### ${ENV_NAME}"
+              echo "✅ **ACTIVE**"
             else
-              echo "**${ENV_NAME}**  "
-              echo "❌ INACTIVE"
+              echo "### ${ENV_NAME}"
+              echo "❌ **INACTIVE**"
             fi
-            echo
           done)
 
-          ### <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCwyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTYgMTJsLTQtNHYzSDRWNWgzTDMgMUwwIDVoM3Y2YTIgMiAwIDAgMCAyIDJoN3YzbDQtNHoiIGZpbGw9IiMwMEI0RDEiLz48L3N2Zz4=" width="20" height="20" style="vertical-align: middle;"> Pipeline Results
+          ## 📊 Pipeline Results
 
-          #### 🔐 AUTHENTICATION
-          **Workload Identity**  
-          $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Successful" || echo "❌ Failed")
+          ### 🔐 AUTHENTICATION
+          **Workload Identity**
+          $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ **Successful**" || echo "❌ **Failed**")
 
-          #### 🔍 CODE QUALITY
-          **API Validation**  
-          $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")
+          ### 🔍 CODE QUALITY
+          **API Validation**
+          $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ **Passed**" || echo "❌ **Failed**")
 
-          #### 📦 BUNDLE
-          **Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}**  
-          $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Uploaded" || echo "❌ Failed")
+          ### 📦 BUNDLE
+          **Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}**
+          $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ **Uploaded**" || echo "❌ **Failed**")
 
-          #### 🚀 DEPLOYMENT
-          **All Environments**  
-          $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Deployed" || echo "❌ Failed")
+          ### 🚀 DEPLOYMENT
+          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+            echo "✅ **Deployed**"
+            echo "**Status:** Successfully deployed to all environments"
+          else
+            echo "❌ **Failed**"
+            echo "**Status:** Deployment encountered issues"
+          fi)
 
           ---
-
-          ### <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCwyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkw2LjUgMTJIMTdsLTUuNSAxMEwxMiAyeiIgZmlsbD0iIzAwQjREMSIvPjwvc3ZnPg==" width="20" height="20" style="vertical-align: middle;"> Final Status
 
           $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
              [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
              [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "### ✨ Deployment Successfully Completed"
+            echo "# ✨ Deployment Successfully Completed"
           else
-            echo "### ⚠️ Deployment Issues Detected"
+            echo "# ⚠️ Deployment Issues Detected"
           fi)
 
-          ---
-          
           <sub>Run ID: \`${{ github.run_id }}\`</sub>
           EOF
+
+      # Also create a detailed log file for reference
+      - name: Generate Detailed Log
+        if: always()
+        run: |
+          cat << EOF > deployment-details.log
+          ================================
+          Apigee Proxy Deployment Details
+          ================================
+          Time: $(date '+%d/%m/%Y, %H:%M:%S')
+          Proxy: ${{ inputs.proxy_name }}
+          Revision: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+          Group: ${{ inputs.environment_group }}
+
+          Environment Status:
+          ------------------
+          $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
+            if [ "${{ inputs.environment_group }}" == "default" ]; then
+              ENV_NAME="${env}"
+            else
+              ENV_NAME="${{ inputs.environment_group }}-${env}"
+            fi
+            echo "${ENV_NAME}: $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "ACTIVE" || echo "INACTIVE")"
+          done)
+
+          Pipeline Results:
+          ----------------
+          Authentication: ${{ needs.GCP_Auth.result }}
+          Code Quality: ${{ needs.ApigeeLint.result }}
+          Bundle Upload: ${{ needs.Prepare_and_Upload.result }}
+          Deployment: ${{ needs.Deploy_to_Environment.result }}
+
+          Final Status:
+          -------------
+          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+             [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+             [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+             [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
+            echo "Deployment Successfully Completed"
+          else
+            echo "Deployment Issues Detected"
+          fi)
+
+          Run ID: ${{ github.run_id }}
+          EOF
+
+      - name: Upload Deployment Log
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-summary
+          path: deployment-details.log
+          retention-days: 30
 
