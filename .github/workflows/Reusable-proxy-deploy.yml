@@ -158,16 +158,22 @@ jobs:
             exit 1
           fi
 
-      - name: Upload and Get Revision
-        id: upload
+      - name: Debug Token
         run: |
-          echo "Importing API proxy bundle to Apigee organization"
-          TOKEN="${{ needs.GCP_Auth.outputs.access_token }}"
-          
-          if [ -z "$TOKEN" ]; then
-            echo "Error: Access token is not available"
+          echo "Checking access token from GCP_Auth job..."
+          if [ -n "${{ needs.GCP_Auth.outputs.token }}" ]; then
+            echo "Access token is available"
+          else
+            echo "Access token is missing"
             exit 1
           fi
+
+      - name: Upload and Get Revision
+        id: upload
+        env:
+          TOKEN: ${{ needs.GCP_Auth.outputs.token }}
+        run: |
+          echo "Importing API proxy bundle to Apigee organization"
           
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
