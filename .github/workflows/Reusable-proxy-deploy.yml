@@ -273,179 +273,91 @@ jobs:
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Generate Professional Summary
+      - name: Generate Deployment Summary
+        shell: bash
         run: |
-          cat << EOF >> $GITHUB_STEP_SUMMARY
-          # 📦 Apigee Proxy Deployment Status
-          Deployment Time: $(date '+%d/%m/%Y, %H:%M:%S')
-
-          ## ⚡ Stage Details
-
-          <table>
-            <tr>
-              <th>Stage</th>
-              <th>Status</th>
-              <th>Details</th>
-            </tr>
-            <!-- Authentication -->
-            <tr>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>🔐 Authentication</span>
-                </div>
-              </td>
-              <td>
-                $(if [ "${{ needs.GCP_Auth.result }}" == "success" ]; then
-                  echo "<span style=\"color: #2DA44E;\">✓ Successful</span>"
-                else
-                  echo "<span style=\"color: #CF222E;\">× Failed</span>"
-                fi)
-              </td>
-              <td><code>Workload Identity Federation</code></td>
-            </tr>
-            <!-- Code Quality -->
-            <tr>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>🔍 Code Quality</span>
-                </div>
-              </td>
-              <td>
-                $(if [ "${{ needs.ApigeeLint.result }}" == "success" ]; then
-                  echo "<span style=\"color: #2DA44E;\">✓ Passed</span>"
-                else
-                  echo "<span style=\"color: #CF222E;\">× Failed</span>"
-                fi)
-              </td>
-              <td><code>API Validation</code></td>
-            </tr>
-            <!-- Bundle -->
-            <tr>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>📦 Bundle</span>
-                </div>
-              </td>
-              <td>
-                $(if [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-                  echo "<span style=\"color: #2DA44E;\">✓ Uploaded</span>"
-                else
-                  echo "<span style=\"color: #CF222E;\">× Failed</span>"
-                fi)
-              </td>
-              <td><code>Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</code></td>
-            </tr>
-            <!-- Deployment -->
-            <tr>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>🚀 Deployment</span>
-                </div>
-              </td>
-              <td>
-                $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-                  echo "<span style=\"color: #2DA44E;\">✓ Deployed</span>"
-                else
-                  echo "<span style=\"color: #CF222E;\">× Failed</span>"
-                fi)
-              </td>
-              <td><code>${{ inputs.environment_group }}</code></td>
-            </tr>
-          </table>
-
-          ## 🌐 Environment Status
-
-          <table>
-            <tr>
-              <th>Environment</th>
-              <th>Status</th>
-              <th>Health</th>
-            </tr>
-            $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
-              if [ "${{ inputs.environment_group }}" == "default" ]; then
-                ENV_NAME="${env}"
-              else
-                ENV_NAME="${{ inputs.environment_group }}-${env}"
-              fi
-              echo "<tr>"
-              echo "<td><code>${ENV_NAME}</code></td>"
-              if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-                echo "<td><span style=\"color: #2DA44E;\">✓ ACTIVE</span></td>"
-                echo "<td><span style=\"background: #2DA44E; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;\">OPTIMAL</span></td>"
-              else
-                echo "<td><span style=\"color: #CF222E;\">× FAILED</span></td>"
-                echo "<td><span style=\"background: #CF222E; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;\">CRITICAL</span></td>"
-              fi
-              echo "</tr>"
-            done)
-          </table>
-
-          ## 📊 Deployment Details
-
-          <table>
-            <tr>
-              <th align="left">Property</th>
-              <th align="left">Value</th>
-            </tr>
-            <tr>
-              <td>Proxy Name</td>
-              <td><code>${{ inputs.proxy_name }}</code></td>
-            </tr>
-            <tr>
-              <td>Revision</td>
-              <td><code>${{ needs.Prepare_and_Upload.outputs.latest_revision }}</code></td>
-            </tr>
-            <tr>
-              <td>Group</td>
-              <td><code>${{ inputs.environment_group }}</code></td>
-            </tr>
-          </table>
-
-          ## 📈 Final Status
-
-          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+          echo "# 🎯 Apigee Proxy Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<sub>**Deployment Time:** $(date '+%d/%m/%Y, %H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🔐 Identity & Authentication" >> $GITHUB_STEP_SUMMARY
+          echo "| Process | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Workload Identity Federation | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Verified" || echo "❌ Failed") | Service Account Authentication |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Code Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API Proxy Lint Check | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed") | Policy & Structure Validation |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Bundle Operations" >> $GITHUB_STEP_SUMMARY
+          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Proxy Bundle Creation | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Created" || echo "❌ Failed") | Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }} |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|---------|--------------|" >> $GITHUB_STEP_SUMMARY
+          # Process each environment
+          IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
+          for env in "${ENVS[@]}"; do
+            if [ "${{ inputs.environment_group }}" == "default" ]; then
+              ENV_NAME="${env}"
+            else
+              ENV_NAME="${{ inputs.environment_group }}-${env}"
+            fi
+            if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+              echo "| \`${ENV_NAME}\` | ✅ ACTIVE | \`OPTIMAL\` |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| \`${ENV_NAME}\` | ❌ FAILED | \`CRITICAL\` |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Proxy | \`${{ inputs.proxy_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Revision | \`${{ needs.Prepare_and_Upload.outputs.latest_revision }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Organization | \`${{ secrets.apigee_org }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Group | \`${{ inputs.environment_group }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environments | \`${{ inputs.environment_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧹 Cleanup Operations" >> $GITHUB_STEP_SUMMARY
+          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Old Revision Cleanup | $([ "${{ needs.Cleanup_Old_Revisions.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Keeping Latest 5 Revisions |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Final Status" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
              [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
              [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "<div style=\"padding: 16px; border-radius: 6px; background-color: #2DA44E; color: white;\">"
-            echo "<h3 style=\"margin: 0;\">✨ Deployment Successfully Completed</h3>"
-            echo "</div>"
+            echo "<table><tr><td><h3>✨ Deployment Successfully Completed</h3>" >> $GITHUB_STEP_SUMMARY
+            echo "<ul>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Authentication: ✅ Verified</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Code Quality: ✅ Standards Met</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Bundle: ✅ Created & Uploaded</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Deployment: ✅ Successfully Deployed</li>" >> $GITHUB_STEP_SUMMARY
+            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
           else
-            echo "<div style=\"padding: 16px; border-radius: 6px; background-color: #CF222E; color: white;\">"
-            echo "<h3 style=\"margin: 0;\">⚠️ Deployment Issues Detected</h3>"
-            echo "</div>"
-          fi)
+            echo "<table><tr><td><h3>⚠️ Deployment Issues Detected</h3>" >> $GITHUB_STEP_SUMMARY
+            echo "<ul>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Authentication: $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Code Quality: $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Bundle: $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Deployment: $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "<sub>Run ID: \`${{ github.run_id }}\` | Generated: $(date '+%H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
 
-          ---
-          <sub>Run ID: \`${{ github.run_id }}\`</sub>
-          EOF
-
-      - name: Create Downloadable Summary
-        if: always()
-        run: |
-          {
-            echo "# Apigee Proxy Deployment Summary"
-            echo "Generated: $(date '+%Y-%m-%d %H:%M:%S')"
-            echo
-            echo "## Stage Status"
-            echo "- Authentication: ${{ needs.GCP_Auth.result }}"
-            echo "- Code Quality: ${{ needs.ApigeeLint.result }}"
-            echo "- Bundle Upload: ${{ needs.Prepare_and_Upload.result }}"
-            echo "- Deployment: ${{ needs.Deploy_to_Environment.result }}"
-            echo
-            echo "## Environment Status"
-            echo "Group: ${{ inputs.environment_group }}"
-            echo "Environments: ${{ inputs.environment_type }}"
-            echo
-            echo "## Run Information"
-            echo "Run ID: ${{ github.run_id }}"
-            echo "Workflow: ${{ github.workflow }}"
-          } > deployment-summary.md
-
-      - name: Upload Summary
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: deployment-summary
-          path: deployment-summary.md
-          retention-days: 30
