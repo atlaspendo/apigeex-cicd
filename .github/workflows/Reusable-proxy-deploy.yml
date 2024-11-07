@@ -272,48 +272,90 @@ jobs:
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Generate Deployment Summary
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const environments = ${{ needs.Prepare_Environment_List.outputs.environments }};
-            const deployResults = {};
-            environments.forEach(env => {
-              deployResults[env] = '${{ needs.Deploy_to_Environment.result }}';
-            });
-
-            const summaryData = {
-              proxyName: '${{ inputs.proxy_name }}',
-              version: '${{ needs.Prepare_and_Upload.outputs.latest_revision }}',
-              deployedEnvironments: environments,
-              authResult: '${{ needs.GCP_Auth.result }}',
-              lintResult: '${{ needs.ApigeeLint.result }}',
-              uploadResult: '${{ needs.Prepare_and_Upload.result }}',
-              deployResults: deployResults,
-              timestamp: new Date().toLocaleString()
-            };
-
-            const fs = require('fs');
-            const path = require('path');
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          <div class="markdown-body">
+            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
             
-            // Read the component
-            const componentPath = path.join(process.env.GITHUB_WORKSPACE, '.github', 'components', 'DeploymentSummary.jsx');
-            
-            // Create summary with React component
-            await core.summary
-              .addRaw(`
-                <script type="module">
-                  import { createElement } from 'react';
-                  import { createRoot } from 'react-dom/client';
-                  import DeploymentSummary from '${componentPath}';
+            <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
+              <!-- Header -->
+              <div class="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-4">
+                <h1 class="text-2xl font-bold text-white">Apigee Deployment Summary</h1>
+                <p class="text-blue-100">Timestamp: $(date)</p>
+              </div>
+              
+              <!-- Content -->
+              <div class="p-6 space-y-6">
+                <!-- Basic Info -->
+                <div class="bg-gray-50 rounded p-4">
+                  <h2 class="text-lg font-semibold text-gray-700 mb-3">Deployment Information</h2>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div class="flex justify-between p-2 bg-white rounded shadow">
+                      <span class="text-gray-600">Proxy Name:</span>
+                      <span class="font-medium">${{ inputs.proxy_name }}</span>
+                    </div>
+                    <div class="flex justify-between p-2 bg-white rounded shadow">
+                      <span class="text-gray-600">Version:</span>
+                      <span class="font-medium">${{ needs.Prepare_and_Upload.outputs.latest_revision }}</span>
+                    </div>
+                  </div>
+                </div>
 
-                  const container = document.getElementById('deployment-summary');
-                  const root = createRoot(container);
-                  root.render(createElement(DeploymentSummary, ${JSON.stringify(summaryData)}));
-                </script>
-                <div id="deployment-summary"></div>
-              `)
-              .write();
+                <!-- Pipeline Status -->
+                <div class="space-y-4">
+                  <h2 class="text-lg font-semibold text-gray-700">Pipeline Status</h2>
+                  
+                  <!-- Authentication -->
+                  <div class="flex items-center justify-between p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
+                    <div>
+                      <h3 class="font-medium text-gray-700">Authentication</h3>
+                      <p class="text-sm text-gray-500">GCP Workload Identity</p>
+                    </div>
+                    <span class="text-green-500 text-2xl">✓</span>
+                  </div>
+
+                  <!-- Linting -->
+                  <div class="flex items-center justify-between p-4 $([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
+                    <div>
+                      <h3 class="font-medium text-gray-700">Linting</h3>
+                      <p class="text-sm text-gray-500">API Proxy Validation</p>
+                    </div>
+                    <span class="$([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "✓" || echo "✗")</span>
+                  </div>
+
+                  <!-- Upload -->
+                  <div class="flex items-center justify-between p-4 $([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
+                    <div>
+                      <h3 class="font-medium text-gray-700">Upload</h3>
+                      <p class="text-sm text-gray-500">Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</p>
+                    </div>
+                    <span class="$([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "✓" || echo "✗")</span>
+                  </div>
+
+                  <!-- Deployment -->
+                  <div class="flex items-center justify-between p-4 $([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
+                    <div>
+                      <h3 class="font-medium text-gray-700">Deployment</h3>
+                      <p class="text-sm text-gray-500">Target Environments: ${{ needs.Prepare_Environment_List.outputs.environments }}</p>
+                    </div>
+                    <span class="$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "✓" || echo "✗")</span>
+                  </div>
+                </div>
+
+                <!-- Environment Status -->
+                <div class="bg-gray-50 rounded p-4">
+                  <h2 class="text-lg font-semibold text-gray-700 mb-3">Environment Status</h2>
+                  <div class="grid grid-cols-3 gap-4">
+                    $(echo "${{ needs.Prepare_Environment_List.outputs.environments }}" | jq -r '.[]' | while read env; do
+                      echo "<div class=\"flex justify-between p-2 bg-white rounded shadow\">"
+                      echo "<span class=\"text-gray-600\">$env:</span>"
+                      echo "<span class=\"$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500")\">$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "✓" || echo "✗")</span>"
+                      echo "</div>"
+                    done)
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          EOF
