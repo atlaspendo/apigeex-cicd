@@ -267,6 +267,7 @@ jobs:
             done
           fi
 
+  ```yaml
   Deployment_Summary:
     needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
     if: always()
@@ -285,6 +286,60 @@ jobs:
           
           </div>
           
+          ## 📊 Deployment Pipeline Flow
+
+          \`\`\`mermaid
+          graph LR
+              A[Authentication] -->|${{ needs.GCP_Auth.result }}| B[Linting]
+              B -->|${{ needs.ApigeeLint.result }}| C[Upload]
+              C -->|${{ needs.Prepare_and_Upload.result }}| D[Deployment]
+              D -->|${{ needs.Deploy_to_Environment.result }}| E[Cleanup]
+              
+              style A fill:#0366d6,color:#fff
+              style B fill:#28a745,color:#fff
+              style C fill:#6f42c1,color:#fff
+              style D fill:#d73a49,color:#fff
+              style E fill:#1b1f23,color:#fff
+          \`\`\`
+
+          ## 🎯 Deployment Status Chart
+
+          \`\`\`mermaid
+          pie title Deployment Stage Status
+              "Successful" : $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+                             [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+                             [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+                             [ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "100" || echo "0")
+              "Failed" : $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+                          [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+                          [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+                          [ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "0" || echo "100")
+          \`\`\`
+
+          ## 🌐 Environment Deployment Timeline
+
+          \`\`\`mermaid
+          gantt
+              title Environment Deployment Timeline
+              dateFormat HH:mm:ss
+              axisFormat %H:%M:%S
+              
+              section Pipeline
+              Authentication :done, auth, $(date '+%H:%M:%S'), 2m
+              Linting      :done, lint, after auth, 2m
+              Upload      :done, upload, after lint, 2m
+              $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
+                if [ "${{ inputs.environment_group }}" == "default" ]; then
+                  ENV_NAME="${env}"
+                else
+                  ENV_NAME="${{ inputs.environment_group }}-${env}"
+                fi
+                echo "Deploy to ${ENV_NAME} :done, dep_${env}, after upload, 3m"
+              done)
+          \`\`\`
+
+          ## 📈 Stage Details
+
           <table align="center">
             <tr>
               <td align="center">
@@ -307,9 +362,9 @@ jobs:
               </td>
             </tr>
           </table>
-          
-          ## 🌐 Environment Matrix
-          
+
+          ## 🎯 Environment Status Matrix
+
           <table align="center">
             <tr>
               <th align="center">Environment</th>
@@ -337,9 +392,20 @@ jobs:
               fi
             done)
           </table>
-          
-          ## 📊 Pipeline Status
-          
+
+          ## 🔍 Pipeline Status Chart
+
+          \`\`\`mermaid
+          stateDiagram-v2
+              [*] --> Authentication
+              Authentication --> Linting: ${{ needs.GCP_Auth.result }}
+              Linting --> Upload: ${{ needs.ApigeeLint.result }}
+              Upload --> Deployment: ${{ needs.Prepare_and_Upload.result }}
+              Deployment --> [*]: ${{ needs.Deploy_to_Environment.result }}
+          \`\`\`
+
+          ## 📊 Pipeline Stage Results
+
           <table align="center">
             <tr>
               <th align="center">Stage</th>
@@ -367,9 +433,9 @@ jobs:
               <td align="center"><code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">Environment Deploy</code></td>
             </tr>
           </table>
-          
+
           ## 📈 Final Status
-          
+
           <div align="center" style="margin: 20px 0;">
             $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
                [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
@@ -384,12 +450,13 @@ jobs:
               echo "</div>"
             fi)
           </div>
-          
+
           ---
-          
+
           <div align="center" style="margin-top: 20px;">
             <code style="background-color: #2f363d; color: white; padding: 4px 8px; border-radius: 4px;">
               Run ID: ${{ github.run_id }}
             </code>
           </div>
           EOF
+
