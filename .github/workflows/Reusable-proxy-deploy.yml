@@ -155,22 +155,13 @@ jobs:
       latest_revision: ${{ steps.upload.outputs.revision }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
-          token_format: 'access_token'
+        uses: actions/checkout@v4
 
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-          $HOME/.apigeecli/bin/apigeecli --help
 
       - name: Create API bundle
         id: create-bundle
