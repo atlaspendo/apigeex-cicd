@@ -268,7 +268,7 @@ jobs:
           fi
 
 
-   Deployment_Summary:
+  Deployment_Summary:
     needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
     if: always()
     runs-on: ${{ inputs.runner }}
