@@ -188,7 +188,7 @@ jobs:
     needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.Prepare_Environment_List.outputs.environments) }}
+        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}  # Fixed reference
       fail-fast: false
       max-parallel: 1
     runs-on: ${{ inputs.runner }}
@@ -214,7 +214,7 @@ jobs:
           APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}  # Fixed reference
         run: |
           if [ -z "$LATEST_REVISION" ]; then
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
