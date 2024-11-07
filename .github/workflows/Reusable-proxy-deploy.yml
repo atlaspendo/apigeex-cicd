@@ -38,7 +38,7 @@ permissions:
   id-token: write
 
 jobs:
-  Prepare_Environment_List:
+  Initialize_Environment_Configuration:
     runs-on: ${{ inputs.runner }}
     outputs:
       environments: ${{ steps.set-envs.outputs.environments }}
@@ -78,7 +78,7 @@ jobs:
           ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
           echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
 
-  GCP_Auth:
+  Setup_GCP_Authentication [WIF]:
     needs: [Prepare_Environment_List]
     runs-on: ${{ inputs.runner }}
     outputs:
@@ -92,7 +92,7 @@ jobs:
           service_account: ${{ secrets.service_account }}
           token_format: 'access_token'
 
-  ApigeeLint:
+  Validate_API_Proxy [ApigeeLint]:
     needs: [GCP_Auth]
     runs-on: ${{ inputs.runner }}
     steps:
@@ -110,7 +110,7 @@ jobs:
       - name: Run apigeelint
         run: apigeelint -s ${{ inputs.proxy_directory }} -f table.js
 
-  Prepare_and_Upload:
+  Build_And_Upload_Proxy:
     needs: [GCP_Auth, ApigeeLint]
     runs-on: ${{ inputs.runner }}
     outputs:
@@ -184,7 +184,7 @@ jobs:
           echo "Latest revision: $LATEST_REVISION"
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-  Deploy_to_Environment:
+  Deploy_Proxy_To_Environment:
     needs: [Prepare_Environment_List, GCP_Auth, Prepare_and_Upload]
     strategy:
       matrix:
@@ -232,7 +232,7 @@ jobs:
             --ovr \
             --wait
 
-  Cleanup_Old_Revisions:
+  Perform_Revision_Cleanup:
     needs: [Deploy_to_Environment]
     if: always()
     runs-on: ${{ inputs.runner }}
@@ -268,7 +268,7 @@ jobs:
           fi
 
 
-  Deployment_Summary:
+  Generate_Deployment_Report:
     needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
     if: always()
     runs-on: ${{ inputs.runner }}
