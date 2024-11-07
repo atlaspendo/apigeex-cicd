@@ -278,176 +278,144 @@ jobs:
           TIMESTAMP=$(date '+%d/%m/%Y, %H:%M:%S')
           
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          <div align="center">
-          
-          # 🎯 Apigee Proxy Deployment Dashboard
-          <sub>Deployment Time: $TIMESTAMP</sub>
-          
-          </div>
-
-          ## 📊 Stage Details
-          <div style="display: flex; justify-content: center; gap: 10px; margin: 20px 0;">
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-              <div style="font-size: 12px; color: #6a737d;">PROXY NAME</div>
-              <div style="font-size: 16px; color: #0366d6; margin-top: 5px; font-weight: bold;">${{ inputs.proxy_name }}</div>
-            </div>
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-              <div style="font-size: 12px; color: #6a737d;">REVISION</div>
-              <div style="font-size: 16px; color: #28a745; margin-top: 5px; font-weight: bold;">${{ needs.Prepare_and_Upload.outputs.latest_revision }}</div>
-            </div>
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; text-align: center; min-width: 150px;">
-              <div style="font-size: 12px; color: #6a737d;">GROUP</div>
-              <div style="font-size: 16px; color: #6f42c1; margin-top: 5px; font-weight: bold;">${{ inputs.environment_group }}</div>
-            </div>
-          </div>
-
-          ## 🎯 Deployment Progress
-          \`\`\`mermaid
-          stateDiagram-v2
-              direction LR
-              classDef success fill:#28a745,color:#fff,stroke:none
-              classDef failure fill:#cb2431,color:#fff,stroke:none
-              classDef neutral fill:#6a737d,color:#fff,stroke:none
-
-              Auth: Authentication
-              Lint: Code Quality
-              Up: Bundle Upload
-              Deploy: Deployment
-              
-              Auth --> Lint
-              Lint --> Up
-              Up --> Deploy
-              
-              $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "class Auth success" || echo "class Auth failure")
-              $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "class Lint success" || echo "class Lint failure")
-              $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "class Up success" || echo "class Up failure")
-              $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "class Deploy success" || echo "class Deploy failure")
-          \`\`\`
-
-          ## 🌐 Environment Status
-
-          <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin: 20px 0;">
-          $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
-            if [ "${{ inputs.environment_group }}" == "default" ]; then
-              ENV_NAME="${env}"
-            else
-              ENV_NAME="${{ inputs.environment_group }}-${env}"
-            fi
-            if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-              echo "<div style=\"background-color: #f0fff4; border: 1px solid #28a745; padding: 15px; border-radius: 8px; min-width: 200px; text-align: center;\">"
-              echo "<div style=\"font-size: 14px; color: #22863a; margin-bottom: 8px;\">${ENV_NAME}</div>"
-              echo "<div style=\"display: flex; justify-content: center; align-items: center; gap: 8px;\">"
-              echo "<span style=\"font-size: 12px; color: #28a745;\">✓ ACTIVE</span>"
-              echo "<span style=\"width: 8px; height: 8px; background-color: #28a745; border-radius: 50%;\"></span>"
-              echo "</div>"
-              echo "</div>"
-            else
-              echo "<div style=\"background-color: #fff5f5; border: 1px solid #cb2431; padding: 15px; border-radius: 8px; min-width: 200px; text-align: center;\">"
-              echo "<div style=\"font-size: 14px; color: #cb2431; margin-bottom: 8px;\">${ENV_NAME}</div>"
-              echo "<div style=\"display: flex; justify-content: center; align-items: center; gap: 8px;\">"
-              echo "<span style=\"font-size: 12px; color: #cb2431;\">⨯ FAILED</span>"
-              echo "<span style=\"width: 8px; height: 8px; background-color: #cb2431; border-radius: 50%;\"></span>"
-              echo "</div>"
-              echo "</div>"
-            fi
-          done)
-          </div>
-
-          ## 📊 Pipeline Results
-
-          <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; margin: 20px 0;">
-            <!-- Authentication -->
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; min-width: 200px;">
-              <div style="font-size: 12px; color: #6a737d; margin-bottom: 8px;">🔐 AUTHENTICATION</div>
-              $(if [ "${{ needs.GCP_Auth.result }}" == "success" ]; then
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #28a745; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #28a745;\">Successful</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Workload Identity</div>"
-              else
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #cb2431; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #cb2431;\">Failed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Auth Error</div>"
-              fi)
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;">
+            <!-- Header Section -->
+            <div style="padding: 16px 0; border-bottom: 1px solid #e1e4e8;">
+              <h1 style="margin: 0; font-size: 24px; color: #24292e;">
+                🎯 Apigee Proxy Deployment Status
+              </h1>
+              <p style="margin: 4px 0 0; font-size: 12px; color: #586069;">
+                Deployment Time: $TIMESTAMP
+              </p>
             </div>
 
-            <!-- Linting -->
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; min-width: 200px;">
-              <div style="font-size: 12px; color: #6a737d; margin-bottom: 8px;">🔍 CODE QUALITY</div>
-              $(if [ "${{ needs.ApigeeLint.result }}" == "success" ]; then
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #28a745; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #28a745;\">Passed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">API Validation</div>"
-              else
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #cb2431; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #cb2431;\">Failed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Quality Issues</div>"
-              fi)
+            <!-- Stage Details Section -->
+            <div style="margin: 24px 0; padding: 16px; background-color: #f6f8fa; border-radius: 6px;">
+              <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                <div style="flex: 1; padding: 12px; background: white; border: 1px solid #e1e4e8; border-radius: 6px;">
+                  <div style="font-size: 12px; color: #586069;">PROXY NAME</div>
+                  <div style="font-size: 16px; font-weight: 600; color: #24292e; margin-top: 4px;">${{ inputs.proxy_name }}</div>
+                </div>
+                <div style="flex: 1; padding: 12px; background: white; border: 1px solid #e1e4e8; border-radius: 6px;">
+                  <div style="font-size: 12px; color: #586069;">REVISION</div>
+                  <div style="font-size: 16px; font-weight: 600; color: #24292e; margin-top: 4px;">${{ needs.Prepare_and_Upload.outputs.latest_revision }}</div>
+                </div>
+                <div style="flex: 1; padding: 12px; background: white; border: 1px solid #e1e4e8; border-radius: 6px;">
+                  <div style="font-size: 12px; color: #586069;">GROUP</div>
+                  <div style="font-size: 16px; font-weight: 600; color: #24292e; margin-top: 4px;">${{ inputs.environment_group }}</div>
+                </div>
+              </div>
             </div>
 
-            <!-- Upload -->
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; min-width: 200px;">
-              <div style="font-size: 12px; color: #6a737d; margin-bottom: 8px;">📦 BUNDLE</div>
-              $(if [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #28a745; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #28a745;\">Uploaded</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</div>"
-              else
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #cb2431; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #cb2431;\">Failed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Upload Error</div>"
-              fi)
+            <!-- Environment Status Section -->
+            <div style="margin: 24px 0;">
+              <h2 style="margin: 0 0 16px; font-size: 20px; color: #24292e;">
+                🌐 Environment Status
+              </h2>
+              $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
+                if [ "${{ inputs.environment_group }}" == "default" ]; then
+                  ENV_NAME="${env}"
+                else
+                  ENV_NAME="${{ inputs.environment_group }}-${env}"
+                fi
+                if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+                  echo "<div style=\"margin: 8px 0; padding: 12px 16px; background-color: #f0fff4; border: 1px solid #34d058; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;\">"
+                  echo "<div style=\"font-size: 14px; color: #24292e;\">${ENV_NAME}</div>"
+                  echo "<div style=\"display: flex; align-items: center; gap: 8px;\">"
+                  echo "<span style=\"width: 8px; height: 8px; background-color: #28a745; border-radius: 50%;\"></span>"
+                  echo "<span style=\"font-size: 12px; color: #28a745; font-weight: 600;\">ACTIVE</span>"
+                  echo "</div>"
+                  echo "</div>"
+                else
+                  echo "<div style=\"margin: 8px 0; padding: 12px 16px; background-color: #fff5f5; border: 1px solid #d73a49; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;\">"
+                  echo "<div style=\"font-size: 14px; color: #24292e;\">${ENV_NAME}</div>"
+                  echo "<div style=\"display: flex; align-items: center; gap: 8px;\">"
+                  echo "<span style=\"width: 8px; height: 8px; background-color: #d73a49; border-radius: 50%;\"></span>"
+                  echo "<span style=\"font-size: 12px; color: #d73a49; font-weight: 600;\">INACTIVE</span>"
+                  echo "</div>"
+                  echo "</div>"
+                fi
+              done)
             </div>
 
-            <!-- Deployment -->
-            <div style="background-color: #f6f8fa; padding: 15px; border-radius: 8px; min-width: 200px;">
-              <div style="font-size: 12px; color: #6a737d; margin-bottom: 8px;">🚀 DEPLOYMENT</div>
-              $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #28a745; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #28a745;\">Deployed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">All Environments</div>"
-              else
-                echo "<div style=\"display: flex; align-items: center; gap: 5px;\">"
-                echo "<span style=\"width: 6px; height: 6px; background-color: #cb2431; border-radius: 50%;\"></span>"
-                echo "<span style=\"font-size: 14px; color: #cb2431;\">Failed</span>"
-                echo "</div>"
-                echo "<div style=\"font-size: 11px; color: #6a737d; margin-top: 5px;\">Deployment Error</div>"
-              fi)
+            <!-- Pipeline Results Section -->
+            <div style="margin: 24px 0;">
+              <h2 style="margin: 0 0 16px; font-size: 20px; color: #24292e;">
+                📊 Pipeline Results
+              </h2>
+              <div style="border: 1px solid #e1e4e8; border-radius: 6px; overflow: hidden;">
+                <!-- Authentication -->
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "#f0fff4" || echo "#fff5f5"); border-bottom: 1px solid #e1e4e8;">
+                  <div>
+                    <div style="font-size: 14px; color: #24292e;">🔐 AUTHENTICATION</div>
+                    <div style="font-size: 12px; color: #586069; margin-top: 2px;">Workload Identity</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: 600;\">Successful</span>" || echo "<span style=\"color: #d73a49; font-weight: 600;\">Failed</span>")
+                  </div>
+                </div>
+
+                <!-- Code Quality -->
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "#f0fff4" || echo "#fff5f5"); border-bottom: 1px solid #e1e4e8;">
+                  <div>
+                    <div style="font-size: 14px; color: #24292e;">🔍 CODE QUALITY</div>
+                    <div style="font-size: 12px; color: #586069; margin-top: 2px;">API Validation</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: 600;\">Passed</span>" || echo "<span style=\"color: #d73a49; font-weight: 600;\">Failed</span>")
+                  </div>
+                </div>
+
+                <!-- Bundle -->
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "#f0fff4" || echo "#fff5f5"); border-bottom: 1px solid #e1e4e8;">
+                  <div>
+                    <div style="font-size: 14px; color: #24292e;">📦 BUNDLE</div>
+                    <div style="font-size: 12px; color: #586069; margin-top: 2px;">Rev: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: 600;\">Uploaded</span>" || echo "<span style=\"color: #d73a49; font-weight: 600;\">Failed</span>")
+                  </div>
+                </div>
+
+                <!-- Deployment -->
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "#f0fff4" || echo "#fff5f5");">
+                  <div>
+                    <div style="font-size: 14px; color: #24292e;">🚀 DEPLOYMENT</div>
+                    <div style="font-size: 12px; color: #586069; margin-top: 2px;">All Environments</div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "<span style=\"color: #28a745; font-weight: 600;\">Deployed</span>" || echo "<span style=\"color: #d73a49; font-weight: 600;\">Failed</span>")
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
 
-          ## 📈 Final Status
+            <!-- Final Status Section -->
+            <div style="margin: 24px 0;">
+              <h2 style="margin: 0 0 16px; font-size: 20px; color: #24292e;">
+                📈 Final Status
+              </h2>
+              <div style="text-align: center;">
+                $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+                   [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+                   [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+                   [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
+                  echo "<div style=\"display: inline-block; padding: 16px 32px; background: linear-gradient(135deg, #28a745 0%, #34d058 100%); border-radius: 8px; box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);\">"
+                  echo "<span style=\"font-size: 16px; color: white; font-weight: 600;\">✨ Deployment Successfully Completed</span>"
+                  echo "</div>"
+                else
+                  echo "<div style=\"display: inline-block; padding: 16px 32px; background: linear-gradient(135deg, #d73a49 0%, #cb2431 100%); border-radius: 8px; box-shadow: 0 2px 4px rgba(215, 58, 73, 0.2);\">"
+                  echo "<span style=\"font-size: 16px; color: white; font-weight: 600;\">⚠️ Deployment Issues Detected</span>"
+                  echo "</div>"
+                fi)
+              </div>
+            </div>
 
-          <div align="center" style="margin: 20px 0;">
-            $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
-               [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
-               [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
-               [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-              echo "<div style=\"background: linear-gradient(45deg, #28a745, #34d058); padding: 20px; border-radius: 8px; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);\">"
-              echo "<h3 style=\"margin: 0; color: white;\">✨ Deployment Successfully Completed</h3>"
-              echo "</div>"
-            else
-              echo "<div style=\"background: linear-gradient(45deg, #cb2431, #ff4444); padding: 20px; border-radius: 8px; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);\">"
-              echo "<h3 style=\"margin: 0; color: white;\">⚠️ Deployment Issues Detected</h3>"
-              echo "</div>"
-            fi)
-          </div>
-
-          <div align="center" style="margin-top: 20px; opacity: 0.8;">
-            <sub>Run ID: <code style="background-color: #f6f8fa; padding: 3px 6px; border-radius: 4px; font-size: 11px;">${{ github.run_id }}</code></sub>
+            <!-- Footer -->
+            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e1e4e8; text-align: center;">
+              <span style="font-size: 12px; color: #586069;">Run ID: </span>
+              <code style="font-size: 12px; background-color: #f6f8fa; padding: 2px 6px; border-radius: 4px;">${{ github.run_id }}</code>
+            </div>
           </div>
           EOF
 
