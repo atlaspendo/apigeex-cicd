@@ -32,7 +32,6 @@ on:
         required: true
       service_account:
         required: true
-      
 
 permissions:
   contents: read
@@ -50,19 +49,14 @@ jobs:
           GROUP="${{ inputs.environment_group }}"
           TYPES="${{ inputs.environment_type }}"
           
-          # Function to generate environment names
           generate_env_list() {
             local group=$1
             local types=$2
             local envs="["
             
-            # Split the types into an array
             IFS=',' read -ra ENV_TYPES <<< "$types"
-            
-            # Counter for adding commas
             local first=true
             
-            # Process each environment type
             for type in "${ENV_TYPES[@]}"; do
               if [ "$first" = true ]; then
                 first=false
@@ -70,7 +64,6 @@ jobs:
                 envs="${envs},"
               fi
               
-              # Add prefix only if not default group
               if [ "$group" = "default" ]; then
                 envs="${envs}\"${type}\""
               else
@@ -82,26 +75,20 @@ jobs:
             echo "$envs"
           }
           
-          # Generate the environment list
           ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
           
-          # Debug output
           echo "Environment Group: $GROUP"
           echo "Environment Types: $TYPES"
           echo "Generated environment list: $ENVIRONMENTS"
           
-          # Set output
           echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
 
   GCP_Auth:
     needs: [Prepare_Environment_List]
     runs-on: ${{ inputs.runner }}
     outputs:
-      access_token: ${{ steps.get-token.outputs.token }}
+      access_token: ${{ steps.auth.outputs.access_token }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
@@ -110,32 +97,23 @@ jobs:
           service_account: ${{ secrets.service_account }}
           token_format: 'access_token'
           create_credentials_file: true
+          access_token_lifetime: '3600s'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Get Access Token
-        id: get-token
+      - name: Get and Store Access Token
         run: |
           TOKEN=$(gcloud auth print-access-token)
           echo "::add-mask::$TOKEN"
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-
-      - name: Debug Token
-        run: |
-          if [ -n "${{ steps.get-token.outputs.token }}" ]; then
-            echo "Access token was successfully generated"
-          else
-            echo "Failed to generate access token"
-            exit 1
-          fi
+          echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
 
   ApigeeLint:
     needs: [GCP_Auth]
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -157,15 +135,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug Access Token
-        run: |
-          if [ -n "${{ needs.GCP_Auth.outputs.access_token }}" ]; then
-            echo "Access token is available"
-          else
-            echo "Access token is missing"
-            exit 1
-          fi
-
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
@@ -173,36 +142,16 @@ jobs:
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
       - name: Create API bundle
-        id: create-bundle
-        working-directory: ${{ github.workspace }}
         run: |
-          create_bundle() {
-            local source_dir="$1"
-            echo "Creating bundle from: $source_dir"
-            mkdir -p temp_bundle
-            cp -r "$source_dir" temp_bundle/apiproxy
-            cd temp_bundle
-            zip -r ../proxy.zip apiproxy
-            cd ..
-            echo "Zip contents:"
-            unzip -l proxy.zip
-            rm -rf temp_bundle
-          }
-          
           if [ -d "${{ inputs.proxy_directory }}" ]; then
-            create_bundle "${{ inputs.proxy_directory }}"
-          elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
-            create_bundle "src/${{ inputs.proxy_directory }}"
+            zip -r proxy.zip ${{ inputs.proxy_directory }}/*
           else
-            echo "Error: Could not find apiproxy directory"
+            echo "Error: Could not find ${{ inputs.proxy_directory }} directory"
             exit 1
           fi
 
       - name: Upload and Get Revision
         id: upload
-        env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
         run: |
           echo "Importing API proxy bundle to Apigee organization"
           TOKEN="${{ needs.GCP_Auth.outputs.access_token }}"
@@ -213,22 +162,14 @@ jobs:
           fi
           
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "$PROXY_NAME" \
+            -n "${{ inputs.proxy_name }}" \
             -p proxy.zip \
-            --org "$APIGEE_ORG" \
+            --org "${{ secrets.apigee_org }}" \
             --token "$TOKEN")
           
           echo "$IMPORT_OUTPUT"
-          
-          LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision": "\K[^"]+')
-          
-          if [ -z "$LATEST_REVISION" ]; then
-            echo "Failed to get revision number"
-            exit 1
-          fi
-          
-          echo "Latest revision: $LATEST_REVISION"
-          echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+          REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP 'revision.*?(\d+)' | grep -oP '\d+')
+          echo "revision=$REVISION" >> $GITHUB_OUTPUT
 
   Deploy_to_Environment:
     needs: [Prepare_Environment_List, GCP_Auth, Prepare_and_Upload]
@@ -240,90 +181,45 @@ jobs:
     runs-on: ${{ inputs.runner }}
     environment: ${{ matrix.environment }}
     steps:
-      - name: Authenticate to Google Cloud
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
-          token_format: 'access_token'
-
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      - name: Debug Environment Variables
-        run: |
-          echo "Current Environment: ${{ matrix.environment }}"
-          echo "Organization: ${{ secrets.apigee_org }}"
-          echo "Proxy Name: ${{ inputs.proxy_name }}"
-          echo "Revision: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}"
-
       - name: Deploy to Environment
-        env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
-          APIGEE_ENV: ${{ matrix.environment }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.GCP_Auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
         run: |
-          if [ -z "$LATEST_REVISION" ]; then
-            echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
-            exit 1
-          fi
+          echo "Deploying proxy '${{ inputs.proxy_name }}' revision '${{ needs.Prepare_and_Upload.outputs.latest_revision }}' to environment '${{ matrix.environment }}'"
           
-          # Debug information
-          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$APIGEE_ENV'"
-          
-          # Deploy the proxy
-          set -x  # Enable command echo for debugging
           $HOME/.apigeecli/bin/apigeecli apis deploy \
-            --name "$PROXY_NAME" \
-            --org "$APIGEE_ORG" \
-            --env "$APIGEE_ENV" \
-            --rev "$LATEST_REVISION" \
-            --token "$ACCESS_TOKEN" \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.apigee_org }}" \
+            --env "${{ matrix.environment }}" \
+            --rev "${{ needs.Prepare_and_Upload.outputs.latest_revision }}" \
+            --token "${{ needs.GCP_Auth.outputs.access_token }}" \
             --ovr \
             --wait
-          set +x  # Disable command echo
 
   Cleanup_Old_Revisions:
-    needs: [Deploy_to_Environment]
+    needs: [Deploy_to_Environment, GCP_Auth]
     if: always()
     runs-on: ${{ inputs.runner }}
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
-
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-
       - name: Delete Older Revisions
-        env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
-          APIGEE_PROXY_NAME: ${{ inputs.proxy_name }}
         run: |
-          ACCESS_TOKEN=$(gcloud auth print-access-token)
-          REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions")
+          REVISIONS=$(curl -s -H "Authorization: Bearer ${{ needs.GCP_Auth.outputs.access_token }}" \
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.apigee_org }}/apis/${{ inputs.proxy_name }}/revisions")
           
-          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
-          TOTAL_REVISIONS=${#REVISIONS[@]}
+          SORTED_REVISIONS=$(echo $REVISIONS | jq -r '.[] | select(. != null)' | sort -n)
+          TOTAL_COUNT=$(echo "$SORTED_REVISIONS" | wc -l)
           KEEP_COUNT=5
           
-          if [ "$TOTAL_REVISIONS" -gt "$KEEP_COUNT" ]; then
-            DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
-            for ((i=0; i<DELETE_COUNT; i++)); do
-              REV="${REVISIONS[$i]}"
-              curl -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions/$REV"
+          if [ $TOTAL_COUNT -gt $KEEP_COUNT ]; then
+            DELETE_COUNT=$((TOTAL_COUNT - KEEP_COUNT))
+            echo "$SORTED_REVISIONS" | head -n $DELETE_COUNT | while read REV; do
+              curl -X DELETE -H "Authorization: Bearer ${{ needs.GCP_Auth.outputs.access_token }}" \
+                "https://apigee.googleapis.com/v1/organizations/${{ secrets.apigee_org }}/apis/${{ inputs.proxy_name }}/revisions/$REV"
+              echo "Deleted revision $REV"
             done
           fi
 
