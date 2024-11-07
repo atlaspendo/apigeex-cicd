@@ -198,5 +198,3 @@ For issues and questions:
    - Steps to reproduce
    - Repository configuration details
 
-## 📝 License
-MIT License - feel free to use and modify as needed.
