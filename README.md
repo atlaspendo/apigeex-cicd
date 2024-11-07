@@ -191,10 +191,15 @@ your-repo/
 └── README.md
 ```
 
-### Reusable Workflow Implementation
+## 📝 Detailed Implementation Guide
 
-#### Workflow Call Configuration
+### Reusable Workflow Structure
+The workflow is designed to be reusable across different repositories with standardized inputs and secrets.
+
+#### 1. Workflow Trigger Configuration
 ```yaml
+name: Apigee Proxy Deployment [Reusable Workflow]
+
 on:
   workflow_call:
     inputs:
@@ -229,9 +234,19 @@ on:
         required: true
 ```
 
-#### Key Jobs and Their Functions
+**Explanation:**
+- `workflow_call`: Enables the workflow to be called from other workflows
+- `inputs`: Configurable parameters that can be passed to the workflow
+  - `proxy_name`: Name of the API proxy to be deployed
+  - `proxy_directory`: Location of the API proxy files
+  - `environment_group`: Target environment group (e.g., default, edd)
+  - `environment_type`: Target environment types (e.g., dev, test, uat)
+- `secrets`: Required secrets for authentication and deployment
+  - `apigee_org`: Apigee organization identifier
+  - `workload_identity_provider`: GCP Workload Identity Provider path
+  - `service_account`: Service account email for authentication
 
-1. **Environment List Preparation**
+#### 2. Environment List Preparation
 ```yaml
 Prepare_Environment_List:
     runs-on: ${{ inputs.runner }}
@@ -244,7 +259,6 @@ Prepare_Environment_List:
           GROUP="${{ inputs.environment_group }}"
           TYPES="${{ inputs.environment_type }}"
           
-          # Environment list generation function
           generate_env_list() {
             local group=$1
             local types=$2
@@ -275,7 +289,16 @@ Prepare_Environment_List:
           echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
 ```
 
-2. **GCP Authentication**
+**Explanation:**
+- **Purpose**: Creates a JSON array of environment names based on group and type
+- **Function Breakdown**:
+  - Takes environment group and types as input
+  - Splits comma-separated environment types
+  - Handles default group differently (no prefix)
+  - Creates properly formatted JSON array
+- **Output**: JSON array like `["dev","test","uat"]` or `["edd-dev","edd-test"]`
+
+#### 3. GCP Authentication
 ```yaml
 GCP_Auth:
     needs: [Prepare_Environment_List]
@@ -283,6 +306,9 @@ GCP_Auth:
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Authenticate to Google Cloud
         id: auth
         uses: 'google-github-actions/auth@v1'
@@ -290,9 +316,64 @@ GCP_Auth:
           workload_identity_provider: ${{ secrets.workload_identity_provider }}
           service_account: ${{ secrets.service_account }}
           token_format: 'access_token'
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Get and Store Access Token
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          echo "::add-mask::$TOKEN"
+          echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
 ```
 
-3. **API Proxy Bundle Creation and Upload**
+**Explanation:**
+- **Purpose**: Securely authenticates with Google Cloud using Workload Identity Federation
+- **Steps**:
+  1. Checkout code to ensure workspace is available
+  2. Authenticate using google-github-actions/auth
+  3. Set up Google Cloud SDK
+  4. Generate and store access token securely
+- **Security Features**:
+  - Token masking in logs
+  - Workload Identity Federation instead of service account keys
+  - Temporary token generation
+
+#### 4. API Proxy Linting
+```yaml
+ApigeeLint:
+    needs: [GCP_Auth]
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install apigeelint
+        run: npm install -g apigeelint
+
+      - name: Run apigeelint
+        run: apigeelint -s ${{ inputs.proxy_directory }} -f table.js
+```
+
+**Explanation:**
+- **Purpose**: Validates API proxy structure and policies
+- **Steps**:
+  1. Sets up Node.js environment
+  2. Installs apigeelint globally
+  3. Runs linting on proxy directory
+- **Validation Checks**:
+  - Policy structure
+  - Best practices
+  - Security configurations
+  - Performance considerations
+
+#### 5. Bundle Preparation and Upload
 ```yaml
 Prepare_and_Upload:
     needs: [GCP_Auth, ApigeeLint]
@@ -300,30 +381,71 @@ Prepare_and_Upload:
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install apigeecli
+        run: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Create API bundle
         run: |
+          create_bundle() {
+            local source_dir="$1"
+            echo "Creating bundle from: $source_dir"
+            mkdir -p temp_bundle
+            cp -r "$source_dir" temp_bundle/apiproxy
+            cd temp_bundle
+            zip -r ../proxy.zip apiproxy
+            cd ..
+            echo "Zip contents:"
+            unzip -l proxy.zip
+            rm -rf temp_bundle
+          }
+          
           if [ -d "${{ inputs.proxy_directory }}" ]; then
-            zip -r proxy.zip ${{ inputs.proxy_directory }}/*
+            create_bundle "${{ inputs.proxy_directory }}"
+          elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
+            create_bundle "src/${{ inputs.proxy_directory }}"
           else
-            echo "Error: Could not find ${{ inputs.proxy_directory }} directory"
+            echo "Error: Could not find apiproxy directory"
             exit 1
           fi
 
       - name: Upload and Get Revision
-        env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        id: upload
         run: |
-          # Upload using apigeecli
+          echo "Importing API proxy bundle to Apigee organization"
+          TOKEN="${{ needs.GCP_Auth.outputs.access_token }}"
+          
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "$PROXY_NAME" \
+            -n "${{ inputs.proxy_name }}" \
             -p proxy.zip \
-            --org "$APIGEE_ORG" \
-            --token "$ACCESS_TOKEN")
+            --org "${{ secrets.apigee_org }}" \
+            --token "$TOKEN")
+          
+          echo "$IMPORT_OUTPUT"
+          REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP 'revision.*?(\d+)' | grep -oP '\d+')
+          echo "revision=$REVISION" >> $GITHUB_OUTPUT
 ```
 
-4. **Environment Deployment**
+**Explanation:**
+- **Purpose**: Creates and uploads API proxy bundle to Apigee
+- **Key Functions**:
+  1. **Bundle Creation**:
+     - Creates temporary directory
+     - Copies proxy files
+     - Creates zip archive
+     - Validates zip contents
+  2. **Upload Process**:
+     - Uses apigeecli for upload
+     - Extracts revision number
+     - Handles error cases
+- **Output**: New revision number for deployment
+
+#### 6. Environment Deployment
 ```yaml
 Deploy_to_Environment:
     needs: [Prepare_Environment_List, GCP_Auth, Prepare_and_Upload]
@@ -335,6 +457,12 @@ Deploy_to_Environment:
     runs-on: ${{ inputs.runner }}
     environment: ${{ matrix.environment }}
     steps:
+      - name: Install apigeecli
+        run: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Deploy to Environment
         env:
           APIGEE_ORG: ${{ secrets.apigee_org }}
@@ -343,6 +471,13 @@ Deploy_to_Environment:
           ACCESS_TOKEN: ${{ needs.GCP_Auth.outputs.access_token }}
           LATEST_REVISION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
         run: |
+          if [ -z "$LATEST_REVISION" ]; then
+            echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
+            exit 1
+          fi
+          
+          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$APIGEE_ENV'"
+          
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
             --org "$APIGEE_ORG" \
@@ -353,38 +488,128 @@ Deploy_to_Environment:
             --wait
 ```
 
-### Deployment Summary Output
-The workflow generates a visual deployment summary showing:
-- Authentication status
-- Linting results
-- Upload confirmation
-- Environment-specific deployment status
-- Overall deployment success/failure
+**Explanation:**
+- **Purpose**: Deploys API proxy to specified environments
+- **Strategy**:
+  - Matrix-based deployment
+  - Sequential execution (max-parallel: 1)
+  - Independent environment handling
+- **Features**:
+  - Overrides existing deployments
+  - Waits for deployment completion
+  - Error handling and validation
 
-### Usage Example
-To use this reusable workflow:
-
-1. **Required Organization Secrets:**
+ #### 7. Cleanup and Revision Management
 ```yaml
-APIGEE_ORG: "your-org-name"
-WORKLOAD_IDENTITY_PROVIDER: "projects/123.../providers/github"
-SERVICE_ACCOUNT: "service-account@project.iam.gserviceaccount.com"
+Cleanup_Old_Revisions:
+    needs: [Deploy_to_Environment]
+    if: always()
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Delete Older Revisions
+        env:
+          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ needs.GCP_Auth.outputs.access_token }}
+        run: |
+          REVISIONS=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions")
+          
+          readarray -t REVISIONS < <(echo "$REVISIONS" | jq -r '.[]' | sort -n)
+          TOTAL_REVISIONS=${#REVISIONS[@]}
+          KEEP_COUNT=5
+          
+          if [ "$TOTAL_REVISIONS" -gt "$KEEP_COUNT" ]; then
+            DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
+            for ((i=0; i<DELETE_COUNT; i++)); do
+              REV="${REVISIONS[$i]}"
+              curl -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
+                "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions/$REV"
+            done
+          fi
 ```
 
-2. **Environment Configuration:**
+**Explanation:**
+- **Purpose**: Manages API proxy revisions by cleaning up old versions
+- **Process**:
+  1. Fetches all revisions
+  2. Sorts numerically
+  3. Keeps latest 5 revisions
+  4. Deletes older revisions
+- **Features**:
+  - Runs even if deployment fails
+  - Maintains revision history
+  - Prevents accumulation of old revisions
+
+#### 8. Deployment Summary
 ```yaml
-environment_group: "default"  # or edd, homerun, wow, wpay
-environment_type: "dev,test,uat"  # comma-separated values
+Deployment_Summary:
+    needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions]
+    if: always()
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Generate Deployment Summary
+        env:
+          LINT_RESULT: ${{ needs.ApigeeLint.result }}
+          DEPLOY_RESULT: ${{ needs.Deploy_to_Environment.result }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          NEW_VERSION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+          ENVIRONMENTS: ${{ needs.Prepare_Environment_List.outputs.environments }}
+          GROUP: ${{ inputs.environment_group }}
+          TYPES: ${{ inputs.environment_type }}
+        run: |
+          {
+            echo "# 🚀 Apigee Proxy Deployment Summary"
+            echo
+            echo "## 📊 Deployment Information"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Proxy Name | ${PROXY_NAME} |"
+            echo "| New Version | ${NEW_VERSION} |"
+            echo "| Environment Group | ${GROUP} |"
+            echo "| Environment Types | ${TYPES} |"
+            echo "| Target Environments | ${ENVIRONMENTS} |"
+            echo
+            echo "## 📋 Status"
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            if [ "$LINT_RESULT" == "success" ]; then
+              echo "| Lint Check | ✅ Success |"
+            else
+              echo "| Lint Check | ❌ Failed |"
+            fi
+            if [ "$DEPLOY_RESULT" == "success" ]; then
+              echo "| Deployment | ✅ Success |"
+            else
+              echo "| Deployment | ❌ Failed |"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
 ```
 
-3. **Input Parameters:**
+**Explanation:**
+- **Purpose**: Generates a comprehensive deployment report
+- **Included Information**:
+  - Proxy details
+  - Environment information
+  - Step-by-step results
+  - Success/failure indicators
+- **Features**:
+  - Markdown formatting
+  - Emoji indicators
+  - Clear status representation
+
+### Usage Examples
+
+#### 1. Basic Deployment
 ```yaml
-proxy_name: "WeatherForecastAPI"
-proxy_directory: "apiproxy"
-runner: "ubuntu-latest"
-```
-
-
+jobs:
+  deploy:
+    uses: ./.github/workflows/Reusable-proxy-deploy.yml
+    with:
+      proxy_name: "WeatherForecastAPI"
+      environment_group: "default"
+      environment_type: "dev,test"
+      proxy_directory: "apiproxy
 
 ## 🔧 Troubleshooting
 
