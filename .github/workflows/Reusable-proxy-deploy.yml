@@ -272,118 +272,159 @@ jobs:
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Generate Enhanced Deployment Summary
+      - name: Generate Visual Summary
         run: |
-          # Get current timestamp
           TIMESTAMP=$(date '+%d/%m/%Y, %H:%M:%S')
           
-          cat << EOF >> $GITHUB_STEP_SUMMARY
+          # Create summary content in a variable
+          SUMMARY_CONTENT=$(cat << 'EOF'
           <div align="center">
           
-          # 🚀 Apigee Proxy Deployment Summary
+          # 🎯 Apigee Proxy Deployment Dashboard
           
-          **Deployment Time:** $TIMESTAMP
-          
-          </div>
+          ### 🕒 Deployment Time: $TIMESTAMP
           
           ---
           
-          ## 📋 Deployment Information
+          </div>
           
-          \`\`\`
-          📦 Proxy: ${{ inputs.proxy_name }}
-          📌 Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
-          🔍 Group: ${{ inputs.environment_group }}
-          \`\`\`
+          <table align="center">
+            <tr>
+              <td align="center">
+                <img src="https://img.shields.io/badge/Proxy-${{ inputs.proxy_name }}-blue?style=for-the-badge&logo=apache&logoColor=white" alt="Proxy Name"/>
+              </td>
+              <td align="center">
+                <img src="https://img.shields.io/badge/Version-${{ needs.Prepare_and_Upload.outputs.latest_revision }}-green?style=for-the-badge&logo=git&logoColor=white" alt="Version"/>
+              </td>
+              <td align="center">
+                <img src="https://img.shields.io/badge/Group-${{ inputs.environment_group }}-orange?style=for-the-badge&logo=google-cloud&logoColor=white" alt="Group"/>
+              </td>
+            </tr>
+          </table>
           
-          ## 🌐 Environment Configuration
+          ## 🎭 Environment Matrix
           
-          ### Target Environments
+          <div align="center">
+          
+          | Environment | Status | Health |
+          |------------|--------|---------|
           $(for env in $(echo ${{ inputs.environment_type }} | tr ',' ' '); do
             if [ "${{ inputs.environment_group }}" == "default" ]; then
-              echo "- \`${env}\` $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌")"
+              ENV_NAME="${env}"
             else
-              echo "- \`${{ inputs.environment_group }}-${env}\` $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌")"
+              ENV_NAME="${{ inputs.environment_group }}-${env}"
+            fi
+            if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ]; then
+              echo "| \`${ENV_NAME}\` | ✅ DEPLOYED | ![Success](https://img.shields.io/badge/health-optimal-success) |"
+            else
+              echo "| \`${ENV_NAME}\` | ❌ FAILED | ![Failed](https://img.shields.io/badge/health-critical-red) |"
             fi
           done)
           
-          ## 📊 Deployment Pipeline Status
+          </div>
           
-          ### 🔐 Authentication
-          \`\`\`diff
-          $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "+ ✓ Authentication Successful" || echo "- ✗ Authentication Failed")
-          Provider: Workload Identity Federation
-          Status: ${{ needs.GCP_Auth.result }}
+          ## 📊 Pipeline Overview
+          
+          <table align="center">
+            <tr>
+              <td align="center">
+                <h3>Authentication</h3>
+                $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "🟢" || echo "🔴")<br>
+                <sub><sup>Workload Identity</sup></sub>
+              </td>
+              <td align="center">
+                <h3>Linting</h3>
+                $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "🟢" || echo "🔴")<br>
+                <sub><sup>Code Quality</sup></sub>
+              </td>
+              <td align="center">
+                <h3>Upload</h3>
+                $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "🟢" || echo "🔴")<br>
+                <sub><sup>Bundle Upload</sup></sub>
+              </td>
+              <td align="center">
+                <h3>Deployment</h3>
+                $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "🟢" || echo "🔴")<br>
+                <sub><sup>Environment Deploy</sup></sub>
+              </td>
+            </tr>
+          </table>
+          
+          ## 📈 Deployment Progress
+          
+          \`\`\`mermaid
+          graph LR
+            A[Authentication] -->|$([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅" || echo "❌")| B[Linting]
+            B -->|$([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅" || echo "❌")| C[Upload]
+            C -->|$([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅" || echo "❌")| D[Deployment]
+            D -->|$([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌")| E[Cleanup]
+            style A fill:#f9f,stroke:#333,stroke-width:2px
+            style B fill:#bbf,stroke:#333,stroke-width:2px
+            style C fill:#dfd,stroke:#333,stroke-width:2px
+            style D fill:#ffd,stroke:#333,stroke-width:2px
+            style E fill:#dff,stroke:#333,stroke-width:2px
           \`\`\`
-          
-          ### 🔍 Linting Results
-          \`\`\`diff
-          $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "+ ✓ Linting Passed" || echo "- ✗ Linting Failed")
-          Tool: apigeelint
-          Status: ${{ needs.ApigeeLint.result }}
-          \`\`\`
-          
-          ### 📦 Upload Process
-          \`\`\`diff
-          $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "+ ✓ Upload Successful" || echo "- ✗ Upload Failed")
-          New Revision: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
-          Status: ${{ needs.Prepare_and_Upload.result }}
-          \`\`\`
-          
-          ### 🚀 Deployment Status
-          \`\`\`diff
-          $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "+ ✓ Deployment Successful" || echo "- ✗ Deployment Failed")
-          Target Environments: ${{ inputs.environment_type }}
-          Status: ${{ needs.Deploy_to_Environment.result }}
-          \`\`\`
-          
-          ## 🧹 Cleanup Summary
-          \`\`\`
-          Retention Policy: Latest 5 revisions
-          Cleanup Status: $([ "${{ needs.Cleanup_Old_Revisions.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed")
-          \`\`\`
-          
-          ## 📈 Deployment Timeline
-          
-          | Stage | Duration | Status |
-          |-------|----------|---------|
-          | 🔐 Authentication | \`${{ needs.GCP_Auth.duration }}\` | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅" || echo "❌") |
-          | 🔍 Linting | \`${{ needs.ApigeeLint.duration }}\` | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅" || echo "❌") |
-          | 📦 Upload | \`${{ needs.Prepare_and_Upload.duration }}\` | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅" || echo "❌") |
-          | 🚀 Deployment | \`${{ needs.Deploy_to_Environment.duration }}\` | $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅" || echo "❌") |
-          | 🧹 Cleanup | \`${{ needs.Cleanup_Old_Revisions.duration }}\` | $([ "${{ needs.Cleanup_Old_Revisions.result }}" == "success" ] && echo "✅" || echo "❌") |
           
           ## 🎯 Final Status
+          
+          <div align="center">
           
           $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
              [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
              [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
-            echo "<details><summary>✨ Deployment Successfully Completed</summary>"
-            echo ""
-            echo "### Success Details"
-            echo "- ✅ All authentication checks passed"
-            echo "- ✅ Code quality standards met"
-            echo "- ✅ Successfully uploaded to Apigee"
-            echo "- ✅ Deployed to all target environments"
-            echo "- ✅ Cleanup completed successfully"
-            echo "</details>"
+            echo "![Success](https://img.shields.io/badge/Deployment-Successful-success?style=for-the-badge&logo=checkmarx&logoColor=white)"
           else
-            echo "<details><summary>⚠️ Deployment Issues Detected</summary>"
-            echo ""
-            echo "### Issue Details"
-            echo "$([ "${{ needs.GCP_Auth.result }}" != "success" ] && echo "- ❌ Authentication failed" || echo "- ✅ Authentication successful")"
-            echo "$([ "${{ needs.ApigeeLint.result }}" != "success" ] && echo "- ❌ Linting failed" || echo "- ✅ Linting passed")"
-            echo "$([ "${{ needs.Prepare_and_Upload.result }}" != "success" ] && echo "- ❌ Upload failed" || echo "- ✅ Upload successful")"
-            echo "$([ "${{ needs.Deploy_to_Environment.result }}" != "success" ] && echo "- ❌ Deployment failed" || echo "- ✅ Deployment successful")"
-            echo "</details>"
+            echo "![Failed](https://img.shields.io/badge/Deployment-Failed-critical?style=for-the-badge&logo=circuitverse&logoColor=white)"
           fi)
+          
+          </div>
           
           ---
           
           <div align="center">
           
-          **Repository:** \`${{ github.repository }}\` | **Workflow:** \`${{ github.workflow }}\` | **Run ID:** \`${{ github.run_id }}\`
+          **📋 [Download Deployment Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+          
+          <sub>Generated by GitHub Actions • Workflow: \`${{ github.workflow }}\` • Run ID: \`${{ github.run_id }}\`</sub>
           
           </div>
           EOF
+          )
+          
+          # Save summary to file
+          echo "$SUMMARY_CONTENT" > deployment-summary.md
+          
+          # Create HTML version for download
+          cat << EOF > deployment-summary.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Deployment Summary</title>
+            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+          </head>
+          <body class="bg-gray-100 p-8">
+            <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+              ${SUMMARY_CONTENT}
+            </div>
+          </body>
+          </html>
+          EOF
+          
+          # Upload summary as artifact
+          echo "::group::Upload Summary as Artifact"
+          mkdir -p deployment-report
+          cp deployment-summary.md deployment-report/
+          cp deployment-summary.html deployment-report/
+          
+      - name: Upload Summary Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-summary
+          path: deployment-report
+          retention-days: 30
+          
+      - name: Write Summary to Step
+        run: |
+          cat deployment-summary.md >> $GITHUB_STEP_SUMMARY
