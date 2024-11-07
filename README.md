@@ -173,14 +173,16 @@ Navigate to Organization Settings → Secrets and variables → Actions and add:
 | `WORKLOAD_IDENTITY_PROVIDER` | WIF provider resource name | `projects/123.../providers/github` |
 | `SERVICE_ACCOUNT` | Service account email | `apigee-deployer@project-id.iam.gserviceaccount.com` |
 
-2. **Repository Structure**
+[Previous sections of README remain the same until Repository Structure]
+
+## 📁 Repository Structure & Code
+
+### Repository Structure
 ```plaintext
 your-repo/
 ├── .github/
-│   ├── workflows/
-│   │   ├── main.yml                    # Main workflow
-│   │   └── Reusable-proxy-deploy.yml   # Reusable workflow
-│   └── components/                      # React components for summary
+│   └── workflows/
+│       └── Reusable-proxy-deploy.yml   # Reusable workflow
 ├── apiproxy/                           # Your API proxy files
 │   ├── proxies/
 │   ├── targets/
@@ -189,89 +191,200 @@ your-repo/
 └── README.md
 ```
 
-## 🚀 Usage Guide
+### Reusable Workflow Implementation
 
-### Manual Deployment
+#### Workflow Call Configuration
+```yaml
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      proxy_directory:
+        description: Working directory to zip up as your proxy bundle
+        required: false
+        type: string
+        default: 'apiproxy'
+      environment_group:
+        description: The environment group to deploy to
+        required: true
+        type: string
+      environment_type:
+        description: The environment types to deploy to
+        required: true
+        type: string
+      runner:
+        description: The runner to use for the job
+        required: false
+        default: 'ubuntu-latest'
+        type: string
+    secrets:
+      apigee_org:
+        required: true
+      workload_identity_provider:
+        required: true
+      service_account:
+        required: true
+```
 
-1. Go to Actions tab in your repository
-2. Select "Apigee Proxy Deployment"
-3. Click "Run workflow"
-4. Fill in parameters:
-   ```yaml
-   proxy_name: "YourProxyName"
-   environment_group: "default"
-   environment_type: "dev,test,uat"
-   proxy_directory: "apiproxy"
-   ```
+#### Key Jobs and Their Functions
 
-### Automated Deployment
+1. **Environment List Preparation**
+```yaml
+Prepare_Environment_List:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      environments: ${{ steps.set-envs.outputs.environments }}
+    steps:
+      - name: Set Environment List
+        id: set-envs
+        run: |
+          GROUP="${{ inputs.environment_group }}"
+          TYPES="${{ inputs.environment_type }}"
+          
+          # Environment list generation function
+          generate_env_list() {
+            local group=$1
+            local types=$2
+            local envs="["
+            
+            IFS=',' read -ra ENV_TYPES <<< "$types"
+            local first=true
+            
+            for type in "${ENV_TYPES[@]}"; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                envs="${envs},"
+              fi
+              
+              if [ "$group" = "default" ]; then
+                envs="${envs}\"${type}\""
+              else
+                envs="${envs}\"${group}-${type}\""
+              fi
+            done
+            
+            envs="${envs}]"
+            echo "$envs"
+          }
+          
+          ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
+          echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
+```
 
-The workflow triggers automatically on:
-- Push to `main` branch
-- Changes in `src/**` or `apiproxy/**`
+2. **GCP Authentication**
+```yaml
+GCP_Auth:
+    needs: [Prepare_Environment_List]
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      access_token: ${{ steps.auth.outputs.access_token }}
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.workload_identity_provider }}
+          service_account: ${{ secrets.service_account }}
+          token_format: 'access_token'
+```
 
-### Environment Configuration
+3. **API Proxy Bundle Creation and Upload**
+```yaml
+Prepare_and_Upload:
+    needs: [GCP_Auth, ApigeeLint]
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      latest_revision: ${{ steps.upload.outputs.revision }}
+    steps:
+      - name: Create API bundle
+        run: |
+          if [ -d "${{ inputs.proxy_directory }}" ]; then
+            zip -r proxy.zip ${{ inputs.proxy_directory }}/*
+          else
+            echo "Error: Could not find ${{ inputs.proxy_directory }} directory"
+            exit 1
+          fi
 
-Supported environment groups:
-- `default`
-- `edd`
-- `homerun`
-- `wow`
-- `wpay`
+      - name: Upload and Get Revision
+        env:
+          APIGEE_ORG: ${{ secrets.apigee_org }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          # Upload using apigeecli
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "$PROXY_NAME" \
+            -p proxy.zip \
+            --org "$APIGEE_ORG" \
+            --token "$ACCESS_TOKEN")
+```
 
-Environment types:
-- `dev`
-- `test`
-- `uat`
+4. **Environment Deployment**
+```yaml
+Deploy_to_Environment:
+    needs: [Prepare_Environment_List, GCP_Auth, Prepare_and_Upload]
+    strategy:
+      matrix:
+        environment: ${{ fromJSON(needs.Prepare_Environment_List.outputs.environments) }}
+      fail-fast: false
+      max-parallel: 1
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Deploy to Environment
+        env:
+          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_ENV: ${{ matrix.environment }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ needs.GCP_Auth.outputs.access_token }}
+          LATEST_REVISION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+        run: |
+          $HOME/.apigeecli/bin/apigeecli apis deploy \
+            --name "$PROXY_NAME" \
+            --org "$APIGEE_ORG" \
+            --env "$APIGEE_ENV" \
+            --rev "$LATEST_REVISION" \
+            --token "$ACCESS_TOKEN" \
+            --ovr \
+            --wait
+```
 
-## 🔍 Workflow Details
+### Deployment Summary Output
+The workflow generates a visual deployment summary showing:
+- Authentication status
+- Linting results
+- Upload confirmation
+- Environment-specific deployment status
+- Overall deployment success/failure
 
-### Main Workflow (`main.yml`)
-- Handles workflow triggers
-- Passes configuration to reusable workflow
-- Manages secrets and inputs
+### Usage Example
+To use this reusable workflow:
 
-### Reusable Workflow (`Reusable-proxy-deploy.yml`)
-1. **Prepare Environment List**
-   - Generates environment names
-   - Handles group prefixing
+1. **Required Organization Secrets:**
+```yaml
+APIGEE_ORG: "your-org-name"
+WORKLOAD_IDENTITY_PROVIDER: "projects/123.../providers/github"
+SERVICE_ACCOUNT: "service-account@project.iam.gserviceaccount.com"
+```
 
-2. **Authentication**
-   - Uses Workload Identity Federation
-   - Generates access tokens
+2. **Environment Configuration:**
+```yaml
+environment_group: "default"  # or edd, homerun, wow, wpay
+environment_type: "dev,test,uat"  # comma-separated values
+```
 
-3. **Validation**
-   - Runs apigeelint
-   - Validates proxy structure
+3. **Input Parameters:**
+```yaml
+proxy_name: "WeatherForecastAPI"
+proxy_directory: "apiproxy"
+runner: "ubuntu-latest"
+```
 
-4. **Upload Process**
-   - Creates proxy bundle
-   - Uploads to Apigee
 
-5. **Deployment**
-   - Matrix-based deployment
-   - Environment-specific handling
-
-6. **Cleanup**
-   - Removes old revisions
-   - Maintains last 5 versions
-
-## 🔒 Security Best Practices
-
-1. **Authentication**
-   - Use Workload Identity Federation instead of service account keys
-   - Implement least privilege access
-   - Regular rotation of service accounts
-
-2. **Repository Security**
-   - Enable branch protection
-   - Require pull request reviews
-   - Enable required status checks
-
-3. **Secrets Management**
-   - Use organization-level secrets
-   - Regular secret rotation
-   - Audit secret access
 
 ## 🔧 Troubleshooting
 
