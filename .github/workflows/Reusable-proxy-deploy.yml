@@ -268,43 +268,52 @@ jobs:
           fi
 
   Deployment_Summary:
-    needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions]
+    needs: [ApigeeLint, Prepare_and_Upload, Deploy_to_Environment, Prepare_Environment_List, Cleanup_Old_Revisions, GCP_Auth]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Generate and Display Deployment Summary
-        env:
-          LINT_RESULT: ${{ needs.ApigeeLint.result }}
-          DEPLOY_RESULT: ${{ needs.Deploy_to_Environment.result }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          NEW_VERSION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
-          ENVIRONMENTS: ${{ needs.Prepare_Environment_List.outputs.environments }}
-          GROUP: ${{ inputs.environment_group }}
-          TYPES: ${{ inputs.environment_type }}
-        run: |
-          {
-            echo "# Apigee Proxy Deployment Summary"
-            echo
-            echo "## Deployment Information"
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| Proxy Name | ${PROXY_NAME} |"
-            echo "| New Version | ${NEW_VERSION} |"
-            echo "| Environment Group | ${GROUP} |"
-            echo "| Environment Types | ${TYPES} |"
-            echo "| Target Environments | ${ENVIRONMENTS} |"
-            echo
-            echo "## Status"
-            echo "| Step | Result |"
-            echo "|------|--------|"
-            if [ "$LINT_RESULT" == "success" ]; then
-              echo "| Lint Check | ✅ Success |"
-            else
-              echo "| Lint Check | ⛔ Failed |"
-            fi
-            if [ "$DEPLOY_RESULT" == "success" ]; then
-              echo "| Deployment | ✅ Success |"
-            else
-              echo "| Deployment | ⛔ Failed |"
-            fi
-          } >> $GITHUB_STEP_SUMMARY
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate Deployment Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const environments = ${{ needs.Prepare_Environment_List.outputs.environments }};
+            const deployResults = {};
+            environments.forEach(env => {
+              deployResults[env] = '${{ needs.Deploy_to_Environment.result }}';
+            });
+
+            const summaryData = {
+              proxyName: '${{ inputs.proxy_name }}',
+              version: '${{ needs.Prepare_and_Upload.outputs.latest_revision }}',
+              deployedEnvironments: environments,
+              authResult: '${{ needs.GCP_Auth.result }}',
+              lintResult: '${{ needs.ApigeeLint.result }}',
+              uploadResult: '${{ needs.Prepare_and_Upload.result }}',
+              deployResults: deployResults,
+              timestamp: new Date().toLocaleString()
+            };
+
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read the component
+            const componentPath = path.join(process.env.GITHUB_WORKSPACE, '.github', 'components', 'DeploymentSummary.jsx');
+            
+            // Create summary with React component
+            await core.summary
+              .addRaw(`
+                <script type="module">
+                  import { createElement } from 'react';
+                  import { createRoot } from 'react-dom/client';
+                  import DeploymentSummary from '${componentPath}';
+
+                  const container = document.getElementById('deployment-summary');
+                  const root = createRoot(container);
+                  root.render(createElement(DeploymentSummary, ${JSON.stringify(summaryData)}));
+                </script>
+                <div id="deployment-summary"></div>
+              `)
+              .write();
