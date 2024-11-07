@@ -274,88 +274,40 @@ jobs:
     steps:
       - name: Generate Deployment Summary
         run: |
+          # Convert environments array to string
+          ENVIRONMENTS=$(echo '${{ needs.Prepare_Environment_List.outputs.environments }}' | tr -d '[]"')
+          
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          <div class="markdown-body">
-            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-            
-            <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
-              <!-- Header -->
-              <div class="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-4">
-                <h1 class="text-2xl font-bold text-white">Apigee Deployment Summary</h1>
-                <p class="text-blue-100">Timestamp: $(date)</p>
-              </div>
-              
-              <!-- Content -->
-              <div class="p-6 space-y-6">
-                <!-- Basic Info -->
-                <div class="bg-gray-50 rounded p-4">
-                  <h2 class="text-lg font-semibold text-gray-700 mb-3">Deployment Information</h2>
-                  <div class="grid grid-cols-2 gap-4">
-                    <div class="flex justify-between p-2 bg-white rounded shadow">
-                      <span class="text-gray-600">Proxy Name:</span>
-                      <span class="font-medium">${{ inputs.proxy_name }}</span>
-                    </div>
-                    <div class="flex justify-between p-2 bg-white rounded shadow">
-                      <span class="text-gray-600">Version:</span>
-                      <span class="font-medium">${{ needs.Prepare_and_Upload.outputs.latest_revision }}</span>
-                    </div>
-                  </div>
-                </div>
+          # 🚀 Apigee Deployment Summary
 
-                <!-- Pipeline Status -->
-                <div class="space-y-4">
-                  <h2 class="text-lg font-semibold text-gray-700">Pipeline Status</h2>
-                  
-                  <!-- Authentication -->
-                  <div class="flex items-center justify-between p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
-                    <div>
-                      <h3 class="font-medium text-gray-700">Authentication</h3>
-                      <p class="text-sm text-gray-500">GCP Workload Identity</p>
-                    </div>
-                    <span class="text-green-500 text-2xl">✓</span>
-                  </div>
+          ## 📊 Pipeline Status
+          | Stage | Status | Details |
+          |-------|--------|---------|
+          | 🔐 Authentication | $([ "${{ needs.GCP_Auth.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | GCP Workload Identity |
+          | 🔍 Linting | $([ "${{ needs.ApigeeLint.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | API Proxy Validation |
+          | 📦 Upload | $([ "${{ needs.Prepare_and_Upload.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }} |
+          | 🚀 Deployment | $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Status by Environment |
 
-                  <!-- Linting -->
-                  <div class="flex items-center justify-between p-4 $([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
-                    <div>
-                      <h3 class="font-medium text-gray-700">Linting</h3>
-                      <p class="text-sm text-gray-500">API Proxy Validation</p>
-                    </div>
-                    <span class="$([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.ApigeeLint.result }}" = "success" ] && echo "✓" || echo "✗")</span>
-                  </div>
+          ## 📋 Deployment Details
+          - **Proxy Name:** ${{ inputs.proxy_name }}
+          - **Version:** ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+          - **Timestamp:** $(date)
+          - **Target Environments:** ${ENVIRONMENTS}
 
-                  <!-- Upload -->
-                  <div class="flex items-center justify-between p-4 $([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
-                    <div>
-                      <h3 class="font-medium text-gray-700">Upload</h3>
-                      <p class="text-sm text-gray-500">Version: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}</p>
-                    </div>
-                    <span class="$([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.Prepare_and_Upload.result }}" = "success" ] && echo "✓" || echo "✗")</span>
-                  </div>
+          ## 🌍 Environment Status
+          $(for env in $(echo ${ENVIRONMENTS} | tr ',' ' '); do
+            echo "- **${env}:** $([ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && echo "✅ Deployed" || echo "❌ Failed")"
+          done)
 
-                  <!-- Deployment -->
-                  <div class="flex items-center justify-between p-4 $([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "bg-green-50" || echo "bg-red-50") rounded-lg border-l-4 $([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "border-green-500" || echo "border-red-500")">
-                    <div>
-                      <h3 class="font-medium text-gray-700">Deployment</h3>
-                      <p class="text-sm text-gray-500">Target Environments: ${{ needs.Prepare_Environment_List.outputs.environments }}</p>
-                    </div>
-                    <span class="$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500") text-2xl">$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "✓" || echo "✗")</span>
-                  </div>
-                </div>
-
-                <!-- Environment Status -->
-                <div class="bg-gray-50 rounded p-4">
-                  <h2 class="text-lg font-semibold text-gray-700 mb-3">Environment Status</h2>
-                  <div class="grid grid-cols-3 gap-4">
-                    $(echo "${{ needs.Prepare_Environment_List.outputs.environments }}" | jq -r '.[]' | while read env; do
-                      echo "<div class=\"flex justify-between p-2 bg-white rounded shadow\">"
-                      echo "<span class=\"text-gray-600\">$env:</span>"
-                      echo "<span class=\"$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "text-green-500" || echo "text-red-500")\">$([ "${{ needs.Deploy_to_Environment.result }}" = "success" ] && echo "✓" || echo "✗")</span>"
-                      echo "</div>"
-                    done)
-                  </div>
-                </div>
-              </div>
-            </div>
+          ## 📝 Summary
+          $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
+             [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
+             [ "${{ needs.ApigeeLint.result }}" == "success" ] && \
+             [ "${{ needs.Prepare_and_Upload.result }}" == "success" ]; then
+            echo "✨ **Deployment Completed Successfully!**"
+          else
+            echo "⚠️ **Deployment Encountered Issues - Check Details Above**"
+          fi)
+          EOF
           </div>
           EOF
