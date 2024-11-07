@@ -280,6 +280,18 @@ jobs:
 
           **Deployment Time:** $(date '+%d/%m/%Y, %H:%M:%S')
 
+          ## Deployment Pipeline Overview
+
+          ```mermaid
+          graph TD;
+              A[Prepare Environment List] --> B[Authenticate to Google Cloud];
+              B --> C[Run Apigee Lint];
+              C --> D[Prepare and Upload Proxy Bundle];
+              D --> E[Deploy to Environment(s)];
+              E --> F[Cleanup Old Revisions];
+              F --> G[Deployment Summary];
+          ```
+
           ## Deployment Details
 
           | Detail | Value |
@@ -328,7 +340,7 @@ jobs:
             echo "**Status:** Deployment encountered issues"
           fi)
 
-          ---
+          ## Final Status Summary
 
           $(if [ "${{ needs.Deploy_to_Environment.result }}" == "success" ] && \
              [ "${{ needs.GCP_Auth.result }}" == "success" ] && \
@@ -342,7 +354,6 @@ jobs:
           <sub>Run ID: \`${{ github.run_id }}\`</sub>
           EOF
 
-      # Also create a detailed log file for reference
       - name: Generate Detailed Log
         if: always()
         run: |
@@ -394,4 +405,3 @@ jobs:
           name: deployment-summary
           path: deployment-details.log
           retention-days: 30
-
