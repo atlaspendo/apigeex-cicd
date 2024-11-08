@@ -286,7 +286,7 @@ jobs:
 
   Perform_Revision_Cleanup:
     needs: [Deploy_Proxy_To_Environment]
-    if: always()
+    if: always() && needs.Deploy_Proxy_To_Environment.outputs.deployment_success == 'true'
     runs-on: ${{ inputs.runner }}
     strategy:
       matrix:
