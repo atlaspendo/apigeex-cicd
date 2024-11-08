@@ -25,76 +25,122 @@ on:
         required: true
         type: boolean
       non_prod_revision:
-        description: Revision number from successful non-prod deployment (required for production)
+        description: Revision number from successful non-prod deployment
         required: false
         type: string
-      runner:
-        description: The runner to use for the job
-        required: false
-        default: 'ubuntu-latest'
+      event_name:
+        description: GitHub event that triggered the workflow
+        required: true
         type: string
     outputs:
       revision:
         description: "The deployed revision number"
         value: ${{ jobs.Build_And_Upload_Proxy.outputs.latest_revision }}
+      deployment_status:
+        description: "Status of the deployment"
+        value: ${{ jobs.validate_deployment_inputs.outputs.deployment_status }}
     secrets:
-      APIGEE_ORG:
-        required: true
-      APIGEE_ORG_PROD:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER_PROD:
-        required: true
-      SERVICE_ACCOUNT:
-        required: true
-      SERVICE_ACCOUNT_PROD:
-        required: true
+      inherit: true
 
 permissions:
   contents: read
   id-token: write
+  issues: write
 
 jobs:
-  Initialize_Environment_Configuration:
-    runs-on: ${{ inputs.runner }}
+  validate_deployment_inputs:
+    runs-on: ubuntu-latest
     outputs:
-      environments: ${{ steps.set-envs.outputs.environments }}
+      can_proceed: ${{ steps.validate.outputs.can_proceed }}
+      deployment_type: ${{ steps.validate.outputs.deployment_type }}
+      deployment_status: ${{ steps.validate.outputs.deployment_status }}
     steps:
-      - name: Set Environment List
-        id: set-envs
+      - name: Validate Environment Configuration
+        id: validate
         run: |
-          generate_env_list() {
-            local group="$1"
-            local types="$2"
-            local envs="["
-            
-            IFS=',' read -ra ENV_TYPES <<< "$types"
-            local first=true
-            
-            for type in "${ENV_TYPES[@]}"; do
-              if [ "$first" = true ]; then
-                first=false
-              else
-                envs="${envs},"
-              fi
-              
-              if [ "$group" = "default" ]; then
-                envs="${envs}\"${type}\""
-              else
-                envs="${envs}\"${group}-${type}\""
-              fi
-            done
-            
-            envs="${envs}]"
-            echo "$envs"
-          }
+          echo "Validating deployment configuration..."
           
-          ENVIRONMENTS=$(generate_env_list "${{ inputs.environment_group }}" "${{ inputs.environment_type }}")
-          echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
+          # Set default values
+          PROCEED=true
+          DEPLOY_TYPE="non-prod"
+          STATUS="pending"
+          
+          # Validate production deployment requirements
+          if [[ "${{ inputs.environment_group }}" == "prod" || "${{ inputs.environment_type }}" == "prod" ]]; then
+            if [[ "${{ inputs.is_production }}" != "true" ]]; then
+              echo "❌ Error: Production environment selected but is_production flag is not set"
+              PROCEED=false
+              STATUS="failed"
+            elif [[ -z "${{ inputs.non_prod_revision }}" ]]; then
+              echo "❌ Error: Production deployment requires non_prod_revision"
+              PROCEED=false
+              STATUS="failed"
+            else
+              DEPLOY_TYPE="prod"
+            fi
+          fi
+          
+          # Validate environment group
+          case "${{ inputs.environment_group }}" in
+            "default"|"edd"|"homerun"|"wow"|"wpay"|"prod")
+              echo "✓ Valid environment group"
+              ;;
+            *)
+              echo "❌ Error: Invalid environment group"
+              PROCEED=false
+              STATUS="failed"
+              ;;
+          esac
+          
+          # Validate environment types
+          IFS=',' read -ra ENV_TYPES <<< "${{ inputs.environment_type }}"
+          for env_type in "${ENV_TYPES[@]}"; do
+            case "$env_type" in
+              "dev"|"test-env"|"test"|"uat"|"prod")
+                echo "✓ Valid environment type: $env_type"
+                ;;
+              *)
+                echo "❌ Error: Invalid environment type: $env_type"
+                PROCEED=false
+                STATUS="failed"
+                ;;
+            esac
+          done
+          
+          # Additional validations for proxy directory
+          if [[ ! -z "${{ inputs.proxy_directory }}" ]]; then
+            if [[ ! "${{ inputs.proxy_directory }}" =~ ^[a-zA-Z0-9_/-]+$ ]]; then
+              echo "❌ Error: Invalid proxy directory path"
+              PROCEED=false
+              STATUS="failed"
+            fi
+          fi
+          
+          if [[ "$PROCEED" == "true" ]]; then
+            STATUS="validated"
+          fi
+          
+          # Set outputs
+          echo "can_proceed=$PROCEED" >> $GITHUB_OUTPUT
+          echo "deployment_type=$DEPLOY_TYPE" >> $GITHUB_OUTPUT
+          echo "deployment_status=$STATUS" >> $GITHUB_OUTPUT
+          
+          # Add validation summary
+          echo "### 🔍 Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment Type | \`$DEPLOY_TYPE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Can Proceed | \`$PROCEED\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Group | \`${{ inputs.environment_group }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Type(s) | \`${{ inputs.environment_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [[ "$DEPLOY_TYPE" == "prod" ]]; then
+            echo "| Production Revision | \`${{ inputs.non_prod_revision }}\` |" >> $GITHUB_STEP_SUMMARY
+          fi
 
   Setup_GCP_Authentication:
-    runs-on: ${{ inputs.runner }}
+    needs: validate_deployment_inputs
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+    runs-on: ubuntu-latest
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
     steps:
@@ -107,8 +153,9 @@ jobs:
           token_format: 'access_token'
 
   Validate_API_Proxy:
-    needs: [Setup_GCP_Authentication]
-    runs-on: ${{ inputs.runner }}
+    needs: [validate_deployment_inputs, Setup_GCP_Authentication]
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -133,15 +180,24 @@ jobs:
             echo "API proxy validation failed"
             exit 1
           fi
-
+          
   Build_And_Upload_Proxy:
-    needs: [Setup_GCP_Authentication, Validate_API_Proxy]
-    runs-on: ${{ inputs.runner }}
+    needs: [validate_deployment_inputs, Setup_GCP_Authentication, Validate_API_Proxy]
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+    runs-on: ubuntu-latest
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
 
       - name: Install apigeecli
         id: install-apigeecli
@@ -178,14 +234,6 @@ jobs:
             echo "Error: Could not find apiproxy directory"
             exit 1
           fi
-
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
-          token_format: 'access_token'
 
       - name: Upload and Get Revision
         id: upload
@@ -225,10 +273,11 @@ jobs:
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-  Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
-    if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
-    runs-on: ${{ inputs.runner }}
+
+  Deploy_To_Environment:
+    needs: [validate_deployment_inputs, Build_And_Upload_Proxy]
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+    runs-on: ubuntu-latest
     outputs:
       deployment_success: ${{ steps.deploy.outputs.success }}
     steps:
@@ -265,6 +314,7 @@ jobs:
           timeout_minutes: 10
           max_attempts: 3
           command: |
+          # Continuing from Deploy_To_Environment job's deployment command:
             echo "Starting deployment process..."
             echo "Proxy Name: $PROXY_NAME"
             echo "Environment Group: $ENV_GROUP"
@@ -321,7 +371,6 @@ jobs:
             DEPLOY_SUCCESS=true
             
             for env_type in "${ENV_TYPES[@]}"; do
-              # Trim whitespace
               env_type=$(echo "$env_type" | xargs)
               
               if [ "$ENV_GROUP" == "default" ]; then
@@ -390,17 +439,17 @@ jobs:
           echo "- **Status:** $([ "${{ steps.deploy.outputs.success }}" == "true" ] && echo "✅ Success" || echo "❌ Failed")" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-  Perform_NonProd_Cleanup:
-    needs: [Deploy_Proxy_To_Environment]
-    if: always() && !inputs.is_production
-    runs-on: ${{ inputs.runner }}
+  Perform_Cleanup:
+    needs: [validate_deployment_inputs, Deploy_To_Environment]
+    if: always() && needs.Deploy_To_Environment.result == 'success'
+    runs-on: ubuntu-latest
     steps:
       - name: Get GCP Token
         id: get-token
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -414,12 +463,13 @@ jobs:
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
       - name: Cleanup Old Revisions
+        id: cleanup
         env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
         run: |
-          echo "Starting non-prod revision cleanup"
+          echo "Starting revision cleanup"
           
           echo "Getting all revisions for proxy $PROXY_NAME"
           REVS=$($HOME/.apigeecli/bin/apigeecli apis list revisions \
@@ -470,98 +520,17 @@ jobs:
                 echo "Failed to delete revision $REV"
               fi
             done
-          else
-            echo "No cleanup needed, total revisions ($TOTAL_REVS) <= keep count ($KEEP_COUNT)"
-          fi
-
-  Perform_Prod_Cleanup:
-    needs: [Deploy_Proxy_To_Environment, Perform_NonProd_Cleanup]
-    if: always() && inputs.is_production
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: 'access_token'
-
-      - name: Install apigeecli
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: |
-            mkdir -p $HOME/.apigeecli/bin
-            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-
-      - name: Cleanup Old Revisions
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
-        run: |
-          echo "Starting production revision cleanup"
-          
-          echo "Getting all revisions for proxy $PROXY_NAME"
-          REVS=$($HOME/.apigeecli/bin/apigeecli apis list revisions \
-            -o "$APIGEE_ORG" \
-            -t "$ACCESS_TOKEN" \
-            -n "$PROXY_NAME" \
-            --json)
-          
-          if [ $? -ne 0 ]; then
-            echo "Failed to get revisions"
-            exit 1
-          fi
-          
-          REVISIONS=($(echo "$REVS" | jq -r '.[] | select(. != null)' | sort -nr))
-          TOTAL_REVS=${#REVISIONS[@]}
-          KEEP_COUNT=5
-          
-          echo "Total revisions found: $TOTAL_REVS"
-          
-          if [ $TOTAL_REVS -gt $KEEP_COUNT ]; then
-            DELETE_COUNT=$((TOTAL_REVS - KEEP_COUNT))
-            echo "Will delete $DELETE_COUNT old revisions"
             
-            for REV in "${REVISIONS[@]:$KEEP_COUNT}"; do
-              echo "Processing revision $REV"
-              
-              DEPLOYED=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
-                -o "$APIGEE_ORG" \
-                -t "$ACCESS_TOKEN" \
-                -n "$PROXY_NAME" \
-                --json)
-              
-              if [[ "$DEPLOYED" == *"$REV"* ]]; then
-                echo "Revision $REV is currently deployed, skipping"
-                continue
-              fi
-              
-              echo "Deleting revision $REV"
-              $HOME/.apigeecli/bin/apigeecli apis delete revision \
-                -o "$APIGEE_ORG" \
-                -t "$ACCESS_TOKEN" \
-                -n "$PROXY_NAME" \
-                -r "$REV"
-              
-              if [ $? -eq 0 ]; then
-                echo "Successfully deleted revision $REV"
-              else
-                echo "Failed to delete revision $REV"
-              fi
-            done
+            echo "cleanup_status=success" >> $GITHUB_OUTPUT
           else
             echo "No cleanup needed, total revisions ($TOTAL_REVS) <= keep count ($KEEP_COUNT)"
+            echo "cleanup_status=skipped" >> $GITHUB_OUTPUT
           fi
 
   Generate_Deployment_Report:
-    needs: [Validate_API_Proxy, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Perform_NonProd_Cleanup, Perform_Prod_Cleanup]
+    needs: [validate_deployment_inputs, Build_And_Upload_Proxy, Deploy_To_Environment, Perform_Cleanup]
     if: always()
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     steps:
       - name: Generate Deployment Summary
         env:
@@ -572,112 +541,92 @@ jobs:
           ENV_TYPE: ${{ inputs.environment_type }}
           APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
         run: |
-          echo "# 🎯 Apigee Proxy Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "# 🎯 Apigee Proxy Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<sub>**Deployment Time:** $(date '+%d/%m/%Y, %H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Identity & Authentication Section
-          echo "## 🔐 Identity & Authentication" >> $GITHUB_STEP_SUMMARY
-          echo "| Process | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Workload Identity Federation | $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Success" || echo "❌ Failed") | Service Account Authentication |" >> $GITHUB_STEP_SUMMARY
+          # Overall Status
+          DEPLOY_SUCCESS="${{ needs.Deploy_To_Environment.result }}"
+          CLEANUP_STATUS="${{ needs.Perform_Cleanup.outputs.cleanup_status }}"
           
-          # Code Analysis Section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🔍 Code Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "| Validation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API Proxy Lint Check | $([ "${{ needs.Validate_API_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed") | Policy & Structure Validation |" >> $GITHUB_STEP_SUMMARY
-          
-          # Bundle Operations Section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📦 Bundle Operations" >> $GITHUB_STEP_SUMMARY
-          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Proxy Bundle Creation | $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Created" || echo "❌ Failed") | Version: $REVISION |" >> $GITHUB_STEP_SUMMARY
-          
-          # Deployment Status Section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|---------|--------------|" >> $GITHUB_STEP_SUMMARY
-          
-          # Process each environment
-          IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
-          for env in "${ENVS[@]}"; do
-            if [ "${{ inputs.environment_group }}" == "default" ]; then
-              ENV_NAME="${env}"
-            else
-              ENV_NAME="${{ inputs.environment_group }}-${env}"
-            fi
-            if [ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ]; then
-              echo "| \`${ENV_NAME}\` | ✅ ACTIVE | \`OPTIMAL\` |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| \`${ENV_NAME}\` | ❌ FAILED | \`CRITICAL\` |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          
-          # Cleanup Status Section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🧹 Cleanup Operations" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-          if [ "$IS_PRODUCTION" == "true" ]; then
-            echo "| Production | $([ "${{ needs.Perform_Prod_Cleanup.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Maintaining latest 5 revisions |" >> $GITHUB_STEP_SUMMARY
+          if [ "$DEPLOY_SUCCESS" == "success" ]; then
+            echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| Non-Production | $([ "${{ needs.Perform_NonProd_Cleanup.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Maintaining latest 5 revisions |" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Deployment Information Section
+          # Deployment Details
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Proxy | \`$PROXY_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Proxy Name | \`$PROXY_NAME\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Revision | \`$REVISION\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Organization | \`$APIGEE_ORG\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Group | \`$ENV_GROUP\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environments | \`$ENV_TYPE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Group | \`$ENV_GROUP\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment Type(s) | \`$ENV_TYPE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.is_production == true && 'Production' || 'Non-Production' }}\` |" >> $GITHUB_STEP_SUMMARY
           
-          # Final Status Section
+          # Status Details
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📈 Final Status" >> $GITHUB_STEP_SUMMARY
-          
-          # Determine overall status
-          DEPLOY_SUCCESS="${{ needs.Deploy_Proxy_To_Environment.result }}"
-          CLEANUP_SUCCESS="false"
-          if [ "$IS_PRODUCTION" == "true" ]; then
-            CLEANUP_SUCCESS="${{ needs.Perform_Prod_Cleanup.result }}"
-            ENV_TYPE="Production"
-          else
-            CLEANUP_SUCCESS="${{ needs.Perform_NonProd_Cleanup.result }}"
-            ENV_TYPE="Non-Production"
-          fi
-          
-          if [ "$DEPLOY_SUCCESS" == "success" ] && [ "$CLEANUP_SUCCESS" == "success" ]; then
-            echo "<table><tr><td><h3>✨ Deployment Successfully Completed</h3>" >> $GITHUB_STEP_SUMMARY
-            echo "<ul>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Environment: $ENV_TYPE</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Authentication: ✅ Verified</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Code Quality: ✅ Standards Met</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Bundle: ✅ Created & Uploaded</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Deployment: ✅ Successfully Deployed</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Cleanup: ✅ Completed</li>" >> $GITHUB_STEP_SUMMARY
-            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "<table><tr><td><h3>⚠️ Deployment Issues Detected</h3>" >> $GITHUB_STEP_SUMMARY
-            echo "<ul>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Environment: $ENV_TYPE</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Authentication: $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Code Quality: $([ "${{ needs.Validate_API_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Bundle: $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Deployment: $([ "$DEPLOY_SUCCESS" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Cleanup: $([ "$CLEANUP_SUCCESS" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "### 🔍 Status Details" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | $([ "${{ needs.validate_deployment_inputs.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Authentication | $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Successful" || echo "❌ Failed") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bundle Creation | $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Successful" || echo "❌ Failed") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment | $([ "$DEPLOY_SUCCESS" == "success" ] && echo "✅ Successful" || echo "❌ Failed") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup | $([ "$CLEANUP_STATUS" == "success" ] && echo "✅ Completed" || echo "⏭️ Skipped") |" >> $GITHUB_STEP_SUMMARY
           
           # Footer
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "<sub>Run ID: \`${{ github.run_id }}\` | Generated: $(date '+%H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
+
+  Request_Production_Approval:
+    needs: [validate_deployment_inputs, Deploy_To_Environment, Generate_Deployment_Report]
+    if: |
+      always() && 
+      !inputs.is_production && 
+      needs.Deploy_To_Environment.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Production Approval Issue
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Production Deployment Ready - ${{ inputs.proxy_name }}`,
+                body: `
+                ## Production Deployment Request
+                
+                ✅ A successful non-production deployment has completed and is ready for production deployment.
+                
+                ### 📋 Deployment Details
+                - **Proxy Name:** ${{ inputs.proxy_name }}
+                - **Current Revision:** ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
+                - **Non-Prod Environment:** ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+                - **Run ID:** ${context.runId}
+                
+                ### 🚀 Production Deployment Instructions
+                
+                1. Review the deployment in non-prod environment
+                2. Go to Actions → Apigee Proxy Deployment
+                3. Click "Run workflow"
+                4. Fill in the following:
+                   - Proxy Name: ${{ inputs.proxy_name }}
+                   - Environment Group: prod
+                   - Environment Type: prod
+                   - Is Production: ✓ (check the box)
+                   - Non-Prod Revision: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
+                
+                [📥 Start Production Deployment](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/workflows/apigee-deploy.yml)
+                
+                ---
+                <sub>Generated by Apigee Deployment Workflow | Run ID: ${context.runId}</sub>
+                `
+              });
