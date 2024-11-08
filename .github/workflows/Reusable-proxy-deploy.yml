@@ -285,81 +285,85 @@ jobs:
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
 
-  Deploy_To_Environment:
-    needs: [validate_deployment_inputs, Build_And_Upload_Proxy]
-    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
-    runs-on: ubuntu-latest
+  Deploy_Proxy_To_Environment:
+    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
+    if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
+    runs-on: ${{ inputs.runner }}
     outputs:
       deployment_success: ${{ steps.deploy.outputs.success }}
     steps:
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
-          token_format: 'access_token'
+    - name: Get GCP Token
+      id: get-token
+      uses: 'google-github-actions/auth@v1'
+      with:
+        workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+        token_format: 'access_token'
 
-      - name: Install apigeecli
-        id: install-cli
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: |
-            mkdir -p $HOME/.apigeecli/bin
-            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+    - name: Install apigeecli
+      id: install-cli
+      uses: nick-invision/retry@v2
+      with:
+        timeout_minutes: 5
+        max_attempts: 3
+        command: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      - name: Deploy Proxy
-        id: deploy
-        env:
-          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ENV_GROUP: ${{ inputs.environment_group }}
-          ENV_TYPE: ${{ inputs.environment_type }}
-          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
-          REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-        run: |
-          # Split environment types
-          IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
-          DEPLOY_SUCCESS=true
-          
-          for env_type in "${ENV_TYPES[@]}"; do
-            env_type=$(echo "$env_type" | xargs)
-            DEPLOY_ENV="${ENV_GROUP}-${env_type}"
-            
-            if [ "$ENV_GROUP" == "default" ]; then
-              DEPLOY_ENV="${env_type}"
-            fi
-            
-            echo "Deploying to environment: $DEPLOY_ENV"
-            
-            # Deploy the proxy
-            $HOME/.apigeecli/bin/apigeecli apis deploy \
-              -n "$PROXY_NAME" \
-              -o "$APIGEE_ORG" \
-              -e "$DEPLOY_ENV" \
-              -r "$REVISION" \
-              -t "$ACCESS_TOKEN" \
-              --ovr \
-              --wait
-            
-            if [ $? -ne 0 ]; then
-              echo "Failed to deploy to $DEPLOY_ENV"
-              DEPLOY_SUCCESS=false
-              break
-            fi
-            
-            echo "Successfully deployed to $DEPLOY_ENV"
-          done
-          
-          if [ "$DEPLOY_SUCCESS" = true ]; then
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 1
+    - name: Deploy Proxy
+      id: deploy
+      env:
+        APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+        PROXY_NAME: ${{ inputs.proxy_name }}
+        ENV_GROUP: ${{ inputs.environment_group }}
+        ENV_TYPE: ${{ inputs.environment_type }}
+        ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
+        REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
+      run: |
+        # Split environment types
+        IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
+        DEPLOY_SUCCESS=true
+
+        for env_type in "${ENV_TYPES[@]}"; do
+          env_type=$(echo "$env_type" | xargs)
+          DEPLOY_ENV="${ENV_GROUP}-${env_type}"
+
+          if [ "$ENV_GROUP" == "default" ]; then
+            DEPLOY_ENV="${env_type}"
           fi
+
+          echo "---"
+          echo "Deploying to environment: $DEPLOY_ENV"
+          echo "Proxy Name: $PROXY_NAME"
+          echo "Apigee Organization: $APIGEE_ORG"
+          echo "Revision: $REVISION"
+
+          # Deploy the proxy
+          $HOME/.apigeecli/bin/apigeecli apis deploy \
+            -n "$PROXY_NAME" \
+            -o "$APIGEE_ORG" \
+            -e "$DEPLOY_ENV" \
+            -r "$REVISION" \
+            -t "$ACCESS_TOKEN" \
+            --ovr \
+            --wait
+
+          if [ $? -ne 0 ]; then
+            echo "Failed to deploy to $DEPLOY_ENV"
+            DEPLOY_SUCCESS=false
+            break
+          fi
+
+          echo "Successfully deployed to $DEPLOY_ENV"
+        done
+
+        if [ "$DEPLOY_SUCCESS" = true ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
 
   Perform_Cleanup:
     needs: [Deploy_To_Environment]
