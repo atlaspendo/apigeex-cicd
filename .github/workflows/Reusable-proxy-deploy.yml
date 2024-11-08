@@ -324,24 +324,21 @@ jobs:
           command: |
             echo "Starting revision cleanup for environment: $ENVIRONMENT"
             
-            # Get deployments for this environment using corrected apigeecli syntax
-            echo "Fetching deployments for environment $ENVIRONMENT"
-            DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list \
-              -o "$APIGEE_ORG" \
-              -t "$ACCESS_TOKEN" \
-              deployments "$PROXY_NAME" \
-              -e "$ENVIRONMENT")
+            # First, get all revisions
+            echo "Fetching all revisions"
+            REVISIONS_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis list -o "$APIGEE_ORG" -t "$ACCESS_TOKEN" -i)
             
             if [ $? -ne 0 ]; then
-              echo "Failed to fetch deployments for environment $ENVIRONMENT"
+              echo "Failed to fetch revisions"
+              echo "Revisions output: $REVISIONS_OUTPUT"
               exit 1
             fi
             
-            # Extract and sort revision numbers from deployments
-            REVISIONS=($(echo "$DEPLOYMENTS" | grep -o '"revision": "[^"]*"' | cut -d'"' -f4 | sort -nr))
+            # Extract revision numbers and sort them
+            REVISIONS=($(echo "$REVISIONS_OUTPUT" | grep -o '"revision": "[^"]*"' | cut -d'"' -f4 | sort -nr))
             
-            echo "Found ${#REVISIONS[@]} deployed revisions in $ENVIRONMENT"
-            echo "Deployed revisions: ${REVISIONS[*]}"
+            echo "Found ${#REVISIONS[@]} total revisions"
+            echo "All revisions: ${REVISIONS[*]}"
             
             KEEP_COUNT=5
             CURRENT_COUNT=${#REVISIONS[@]}
@@ -349,44 +346,51 @@ jobs:
             if [ "$CURRENT_COUNT" -gt "$KEEP_COUNT" ]; then
               # Calculate how many to remove
               REMOVE_COUNT=$((CURRENT_COUNT - KEEP_COUNT))
-              echo "Will undeploy $REMOVE_COUNT older revisions"
+              echo "Will process $REMOVE_COUNT older revisions"
               
               # Get the revisions to remove (oldest first)
               for ((i=CURRENT_COUNT-1; i>=KEEP_COUNT; i--)); do
                 OLD_REV="${REVISIONS[$i]}"
-                echo "Undeploying revision $OLD_REV from environment $ENVIRONMENT"
+                echo "Processing revision $OLD_REV"
                 
-                $HOME/.apigeecli/bin/apigeecli apis undeploy \
-                  -n "$PROXY_NAME" \
-                  -o "$APIGEE_ORG" \
-                  -e "$ENVIRONMENT" \
-                  -v "$OLD_REV" \
-                  -t "$ACCESS_TOKEN"
+                # Check if revision is deployed in any environment
+                DEPLOYMENT_CHECK=$($HOME/.apigeecli/bin/apigeecli apis list -o "$APIGEE_ORG" -t "$ACCESS_TOKEN" deployments "$PROXY_NAME")
                 
-                if [ $? -ne 0 ]; then
-                  echo "Failed to undeploy revision $OLD_REV from $ENVIRONMENT"
-                  exit 1
+                if [[ "$DEPLOYMENT_CHECK" == *"$OLD_REV"* ]]; then
+                  echo "Revision $OLD_REV is deployed, attempting to undeploy"
+                  
+                  $HOME/.apigeecli/bin/apigeecli apis undeploy \
+                    -o "$APIGEE_ORG" \
+                    -t "$ACCESS_TOKEN" \
+                    -n "$PROXY_NAME" \
+                    --rev "$OLD_REV" \
+                    --env "$ENVIRONMENT"
+                  
+                  if [ $? -ne 0 ]; then
+                    echo "Failed to undeploy revision $OLD_REV"
+                    continue
+                  fi
+                  
+                  echo "Successfully undeployed revision $OLD_REV"
                 fi
                 
-                echo "Successfully undeployed revision $OLD_REV"
-                
-                # Delete the undeployed revision
-                echo "Deleting revision $OLD_REV"
-                $HOME/.apigeecli/bin/apigeecli apis delete \
-                  -n "$PROXY_NAME" \
+                # Delete the revision
+                echo "Attempting to delete revision $OLD_REV"
+                $HOME/.apigeecli/bin/apigeecli apis delete revision \
                   -o "$APIGEE_ORG" \
-                  -v "$OLD_REV" \
-                  -t "$ACCESS_TOKEN"
+                  -t "$ACCESS_TOKEN" \
+                  -n "$PROXY_NAME" \
+                  --rev "$OLD_REV"
                 
                 if [ $? -ne 0 ]; then
                   echo "Failed to delete revision $OLD_REV"
-                  exit 1
+                  continue
                 fi
                 
                 echo "Successfully deleted revision $OLD_REV"
               done
               
-              echo "Cleanup completed for environment $ENVIRONMENT"
+              echo "Cleanup process completed"
             else
               echo "No cleanup needed. Current revision count ($CURRENT_COUNT) <= keep count ($KEEP_COUNT)"
             fi
