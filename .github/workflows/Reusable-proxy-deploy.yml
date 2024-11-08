@@ -34,17 +34,17 @@ on:
         default: 'ubuntu-latest'
         type: string
     secrets:
-      apigee_org:
+      APIGEE_ORG:
         required: true
-      apigee_org_prod:
+      APIGEE_ORG_PROD:
         required: true
-      workload_identity_provider:
+      WORKLOAD_IDENTITY_PROVIDER:
         required: true
-      workload_identity_provider_prod:
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
         required: true
-      service_account:
+      SERVICE_ACCOUNT:
         required: true
-      service_account_prod:
+      SERVICE_ACCOUNT_PROD:
         required: true
 
 permissions:
@@ -103,8 +103,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'workload_identity_provider_prod' : 'workload_identity_provider'] }}
-          service_account: ${{ secrets[inputs.is_production == 'true' ? 'service_account_prod' : 'service_account'] }}
+          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'WORKLOAD_IDENTITY_PROVIDER_PROD' : 'WORKLOAD_IDENTITY_PROVIDER'] }}
+          service_account: ${{ secrets[inputs.is_production == 'true' ? 'SERVICE_ACCOUNT_PROD' : 'SERVICE_ACCOUNT'] }}
           token_format: 'access_token'
 
   Validate_API_Proxy-ApigeeLint:
@@ -138,8 +138,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'workload_identity_provider_prod' : 'workload_identity_provider'] }}
-          service_account: ${{ secrets[inputs.is_production == 'true' ? 'service_account_prod' : 'service_account'] }}
+          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'WORKLOAD_IDENTITY_PROVIDER_PROD' : 'WORKLOAD_IDENTITY_PROVIDER'] }}
+          service_account: ${{ secrets[inputs.is_production == 'true' ? 'SERVICE_ACCOUNT_PROD' : 'SERVICE_ACCOUNT'] }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -178,7 +178,7 @@ jobs:
       - name: Upload and Get Revision
         id: upload
         env:
-          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'apigee_org_prod' : 'apigee_org'] }}
+          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'APIGEE_ORG_PROD' : 'APIGEE_ORG'] }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
@@ -213,8 +213,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'workload_identity_provider_prod' : 'workload_identity_provider'] }}
-          service_account: ${{ secrets[inputs.is_production == 'true' ? 'service_account_prod' : 'service_account'] }}
+          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'WORKLOAD_IDENTITY_PROVIDER_PROD' : 'WORKLOAD_IDENTITY_PROVIDER'] }}
+          service_account: ${{ secrets[inputs.is_production == 'true' ? 'SERVICE_ACCOUNT_PROD' : 'SERVICE_ACCOUNT'] }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -225,7 +225,7 @@ jobs:
 
       - name: Deploy to Environment
         env:
-          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'apigee_org_prod' : 'apigee_org'] }}
+          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'APIGEE_ORG_PROD' : 'APIGEE_ORG'] }}
           APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
@@ -256,13 +256,13 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'workload_identity_provider_prod' : 'workload_identity_provider'] }}
-          service_account: ${{ secrets[inputs.is_production == 'true' ? 'service_account_prod' : 'service_account'] }}
+          workload_identity_provider: ${{ secrets[inputs.is_production == 'true' ? 'WORKLOAD_IDENTITY_PROVIDER_PROD' : 'WORKLOAD_IDENTITY_PROVIDER'] }}
+          service_account: ${{ secrets[inputs.is_production == 'true' ? 'SERVICE_ACCOUNT_PROD' : 'SERVICE_ACCOUNT'] }}
           token_format: 'access_token'
 
       - name: Delete Older Revisions
         env:
-          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'apigee_org_prod' : 'apigee_org'] }}
+          APIGEE_ORG: ${{ secrets[inputs.is_production == 'true' ? 'APIGEE_ORG_PROD' : 'APIGEE_ORG'] }}
           APIGEE_PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
