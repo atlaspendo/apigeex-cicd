@@ -285,45 +285,128 @@ jobs:
               --wait
 
   Perform_Revision_Cleanup:
-    needs: [Deploy_Proxy_To_Environment]
+    needs: [Deploy_Proxy_To_Environment, Initialize_Environment_Configuration]
     if: always()
     runs-on: ${{ inputs.runner }}
+    strategy:
+      matrix:
+        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}
+      fail-fast: false
     steps:
-      - name: Delete Older Revisions
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
+      - name: Install apigeecli
         uses: nick-invision/retry@v2
         with:
           timeout_minutes: 5
           max_attempts: 3
           command: |
-            APIGEE_ORG="${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}"
-            PROXY_NAME="${{ inputs.proxy_name }}"
-            ACCESS_TOKEN="${{ needs.Setup_GCP_Authentication.outputs.access_token }}"
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
+      - name: Cleanup Revisions for Environment
+        uses: nick-invision/retry@v2
+        env:
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENVIRONMENT: ${{ matrix.environment }}
+          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            echo "Starting revision cleanup for environment: $ENVIRONMENT"
             
-            REVISIONS=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions")
+            # Get deployments for this environment
+            echo "Fetching deployments for environment $ENVIRONMENT"
+            DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+              --name "$PROXY_NAME" \
+              --org "$APIGEE_ORG" \
+              --env "$ENVIRONMENT" \
+              --token "$ACCESS_TOKEN")
             
-            if [ $? -ne 0 ] || [ -z "$REVISIONS" ]; then
-              echo "Failed to get revisions"
+            if [ $? -ne 0 ]; then
+              echo "Failed to fetch deployments for environment $ENVIRONMENT"
               exit 1
             fi
             
-            readarray -t REVISIONS < <(echo "$REVISIONS" | jq -r '.[]' | sort -n)
-            TOTAL_REVISIONS=${#REVISIONS[@]}
-            KEEP_COUNT=5
+            # Extract and sort revision numbers from deployments
+            REVISIONS=($(echo "$DEPLOYMENTS" | grep -o '"revision": "[^"]*"' | cut -d'"' -f4 | sort -nr))
             
-            if [ "$TOTAL_REVISIONS" -gt "$KEEP_COUNT" ]; then
-              DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
-              for ((i=0; i<DELETE_COUNT; i++)); do
-                REV="${REVISIONS[$i]}"
-                echo "Deleting revision $REV"
-                curl -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
-                  "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions/$REV"
+            echo "Found ${#REVISIONS[@]} deployed revisions in $ENVIRONMENT"
+            echo "Deployed revisions: ${REVISIONS[*]}"
+            
+            KEEP_COUNT=5
+            CURRENT_COUNT=${#REVISIONS[@]}
+            
+            if [ "$CURRENT_COUNT" -gt "$KEEP_COUNT" ]; then
+              # Calculate how many to remove
+              REMOVE_COUNT=$((CURRENT_COUNT - KEEP_COUNT))
+              echo "Will undeploy $REMOVE_COUNT older revisions"
+              
+              # Get the revisions to remove (oldest first)
+              for ((i=CURRENT_COUNT-1; i>=KEEP_COUNT; i--)); do
+                OLD_REV="${REVISIONS[$i]}"
+                echo "Undeploying revision $OLD_REV from environment $ENVIRONMENT"
+                
+                $HOME/.apigeecli/bin/apigeecli apis undeploy \
+                  --name "$PROXY_NAME" \
+                  --org "$APIGEE_ORG" \
+                  --env "$ENVIRONMENT" \
+                  --rev "$OLD_REV" \
+                  --token "$ACCESS_TOKEN"
+                
                 if [ $? -ne 0 ]; then
-                  echo "Failed to delete revision $REV"
+                  echo "Failed to undeploy revision $OLD_REV from $ENVIRONMENT"
                   exit 1
                 fi
+                
+                echo "Successfully undeployed revision $OLD_REV"
+                
+                # Delete the undeployed revision
+                echo "Deleting revision $OLD_REV"
+                $HOME/.apigeecli/bin/apigeecli apis delete revision \
+                  --name "$PROXY_NAME" \
+                  --org "$APIGEE_ORG" \
+                  --rev "$OLD_REV" \
+                  --token "$ACCESS_TOKEN"
+                
+                if [ $? -ne 0 ]; then
+                  echo "Failed to delete revision $OLD_REV"
+                  exit 1
+                fi
+                
+                echo "Successfully deleted revision $OLD_REV"
               done
+              
+              echo "Cleanup completed for environment $ENVIRONMENT"
+            else
+              echo "No cleanup needed. Current revision count ($CURRENT_COUNT) <= keep count ($KEEP_COUNT)"
             fi
+            
+            # Verify final state
+            FINAL_DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+              --name "$PROXY_NAME" \
+              --org "$APIGEE_ORG" \
+              --env "$ENVIRONMENT" \
+              --token "$ACCESS_TOKEN")
+            
+            FINAL_COUNT=$(echo "$FINAL_DEPLOYMENTS" | grep -o '"revision": "[^"]*"' | wc -l)
+            echo "Final revision count in $ENVIRONMENT: $FINAL_COUNT"
+
+      - name: Add to Deployment Summary
+        run: |
+          echo "### Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Cleanup Status: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Maintained: Last 5 revisions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
   Generate_Deployment_Report:
     needs: [Validate_API_Proxy, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Perform_Revision_Cleanup]
