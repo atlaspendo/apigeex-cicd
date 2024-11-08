@@ -345,5 +345,4 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|---------|--------------|" >> $
+          echo "| Environment | Status | Health Check |" >> $GITHUB_
