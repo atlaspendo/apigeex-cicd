@@ -20,6 +20,14 @@ on:
         description: The environment types to deploy to
         required: true
         type: string
+      is_production:
+        description: Is this a production deployment?
+        required: true
+        type: boolean
+      non_prod_revision:
+        description: Revision number from successful non-prod deployment (required for production)
+        required: false
+        type: string
       runner:
         description: The runner to use for the job
         required: false
@@ -28,9 +36,15 @@ on:
     secrets:
       apigee_org:
         required: true
+      apigee_org_prod:
+        required: true
       workload_identity_provider:
         required: true
+      workload_identity_provider_prod:
+        required: true
       service_account:
+        required: true
+      service_account_prod:
         required: true
 
 permissions:
@@ -38,6 +52,7 @@ permissions:
   id-token: write
 
 jobs:
+
   Initialize_Environment_Configuration:
     runs-on: ${{ inputs.runner }}
     outputs:
@@ -88,8 +103,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
+          workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
+          service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
 
   Validate_API_Proxy-ApigeeLint:
@@ -123,8 +138,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
+          workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
+          service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -163,7 +178,7 @@ jobs:
       - name: Upload and Get Revision
         id: upload
         env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
@@ -188,7 +203,7 @@ jobs:
     needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}  # Fixed reference
+        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}
       fail-fast: false
       max-parallel: 1
     runs-on: ${{ inputs.runner }}
@@ -198,8 +213,8 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
+          workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
+          service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -210,11 +225,11 @@ jobs:
 
       - name: Deploy to Environment
         env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
           APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}  # Fixed reference
+          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
         run: |
           if [ -z "$LATEST_REVISION" ]; then
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
@@ -232,8 +247,39 @@ jobs:
             --ovr \
             --wait
 
+  Deploy_Prod:
+    needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
+    if: inputs.is_production == 'true'
+    environment: production
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.workload_identity_provider_prod }}
+          service_account: ${{ secrets.service_account_prod }}
+          token_format: 'access_token'
+
+      - name: Deploy to Production
+        env:
+          APIGEE_ORG: ${{ secrets.apigee_org_prod }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          LATEST_REVISION: ${{ inputs.non_prod_revision }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to production"
+          $HOME/.apigeecli/bin/apigeecli apis deploy \
+            --name "$PROXY_NAME" \
+            --org "$APIGEE_ORG" \
+            --env "prod" \
+            --rev "$LATEST_REVISION" \
+            --token "$ACCESS_TOKEN" \
+            --ovr \
+            --wait
+
   Perform_Revision_Cleanup:
-    needs: [Deploy_Proxy_To_Environment]
+    needs: [Deploy_Proxy_To_Environment, Deploy_Prod]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
@@ -241,13 +287,13 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
+          workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
+          service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
 
       - name: Delete Older Revisions
         env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
           APIGEE_PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
@@ -267,9 +313,8 @@ jobs:
             done
           fi
 
-
   Generate_Deployment_Report:
-    needs: [Validate_API_Proxy-ApigeeLint, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Initialize_Environment_Configuration, Perform_Revision_Cleanup, Setup_GCP_Authentication]
+    needs: [Validate_API_Proxy-ApigeeLint, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Deploy_Prod, Initialize_Environment_Configuration, Perform_Revision_Cleanup, Setup_GCP_Authentication]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
@@ -301,62 +346,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|---------|--------------|" >> $GITHUB_STEP_SUMMARY
-          # Process each environment
-          IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
-          for env in "${ENVS[@]}"; do
-            if [ "${{ inputs.environment_group }}" == "default" ]; then
-              ENV_NAME="${env}"
-            else
-              ENV_NAME="${{ inputs.environment_group }}-${env}"
-            fi
-            if [ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ]; then
-              echo "| \`${ENV_NAME}\` | ✅ ACTIVE | \`OPTIMAL\` |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| \`${ENV_NAME}\` | ❌ FAILED | \`CRITICAL\` |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Proxy | \`${{ inputs.proxy_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Revision | \`${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Organization | \`${{ secrets.apigee_org }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Group | \`${{ inputs.environment_group }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environments | \`${{ inputs.environment_type }}\` |" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 🧹 Cleanup Operations" >> $GITHUB_STEP_SUMMARY
-          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Old Revision Cleanup | $([ "${{ needs.Perform_Revision_Cleanup.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Keeping Latest 5 Revisions |" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📈 Final Status" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ] && \
-             [ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && \
-             [ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && \
-             [ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ]; then
-            echo "<table><tr><td><h3>✨ Deployment Successfully Completed</h3>" >> $GITHUB_STEP_SUMMARY
-            echo "<ul>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Authentication: ✅ Verified</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Code Quality: ✅ Standards Met</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Bundle: ✅ Created & Uploaded</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Deployment: ✅ Successfully Deployed</li>" >> $GITHUB_STEP_SUMMARY
-            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "<table><tr><td><h3>⚠️ Deployment Issues Detected</h3>" >> $GITHUB_STEP_SUMMARY
-            echo "<ul>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Authentication: $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Code Quality: $([ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Bundle: $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "<li>Deployment: $([ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "<sub>Run ID: \`${{ github.run_id }}\` | Generated: $(date '+%H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|---------|--------------|" >> $
