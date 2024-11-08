@@ -53,7 +53,48 @@ permissions:
 
 jobs:
 
+  Initialize_Environment_Configuration:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      environments: ${{ steps.set-envs.outputs.environments }}
+    steps:
+      - name: Set Environment List
+        id: set-envs
+        run: |
+          GROUP="${{ inputs.environment_group }}"
+          TYPES="${{ inputs.environment_type }}"
+          
+          generate_env_list() {
+            local group=$1
+            local types=$2
+            local envs="["
+            
+            IFS=',' read -ra ENV_TYPES <<< "$types"
+            local first=true
+            
+            for type in "${ENV_TYPES[@]}"; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                envs="${envs},"
+              fi
+              
+              if [ "$group" = "default" ]; then
+                envs="${envs}\"${type}\""
+              else
+                envs="${envs}\"${group}-${type}\""
+              fi
+            done
+            
+            envs="${envs}]"
+            echo "$envs"
+          }
+          
+          ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
+          echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
+
   Setup_GCP_Authentication:
+    needs: [Initialize_Environment_Configuration]
     runs-on: ${{ inputs.runner }}
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
@@ -159,7 +200,7 @@ jobs:
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
+    needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
         environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}
