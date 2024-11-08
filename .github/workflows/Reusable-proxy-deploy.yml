@@ -52,7 +52,35 @@ permissions:
   id-token: write
 
 jobs:
+
+  check_deployment_type:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      deploy_type: ${{ steps.check.outputs.environment }}
+      can_proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - name: Determine Deployment Type
+        id: check
+        run: |
+          if [[ "${{ inputs.environment_group }}" == "prod" || "${{ inputs.environment_type }}" == "prod" ]]; then
+            if [[ "${{ inputs.is_production }}" != "true" ]]; then
+              echo "❌ Error: Production environment selected but is_production flag is not set"
+              echo "proceed=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+            if [[ -z "${{ inputs.non_prod_revision }}" ]]; then
+              echo "❌ Error: Production deployment requires non_prod_revision"
+              echo "proceed=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "environment=non-prod" >> $GITHUB_OUTPUT
+          fi
+          echo "proceed=true" >> $GITHUB_OUTPUT
+
   Setup_GCP_Authentication:
+    needs: [check_deployment_type]
     runs-on: ${{ inputs.runner }}
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
@@ -65,53 +93,21 @@ jobs:
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
 
-  Initialize_Environment_Configuration:
-    needs: [Setup_GCP_Authentication]
-    runs-on: ${{ inputs.runner }}
-    outputs:
-      environments: ${{ steps.set-envs.outputs.environments }}
-    steps:
-      - name: Set Environment List
-        id: set-envs
-        run: |
-          GROUP="${{ inputs.environment_group }}"
-          TYPES="${{ inputs.environment_type }}"
-          generate_env_list() {
-            local group=$1
-            local types=$2
-            local envs="["
-            IFS=',' read -ra ENV_TYPES <<< "$types"
-            local first=true
-            for type in "${ENV_TYPES[@]}"; do
-              if [ "$first" = true ]; then
-                first=false
-              else
-                envs="${envs},"
-              fi
-              if [ "$group" = "default" ]; then
-                envs="${envs}\"${type}\""
-              else
-                envs="${envs}\"${group}-${type}\""
-              fi
-            done
-            envs="${envs}]"
-            echo "$envs"
-          }
-          ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
-          echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
-
   Validate_API_Proxy-ApigeeLint:
     needs: [Setup_GCP_Authentication]
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '20'
+
       - name: Install apigeelint
         run: npm install -g apigeelint
+
       - name: Run apigeelint
         run: apigeelint -s ${{ inputs.proxy_directory }} -f table.js
 
@@ -123,6 +119,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
       - name: Authenticate to Google Cloud
         id: auth
         uses: 'google-github-actions/auth@v1'
@@ -130,12 +127,14 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
+
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
           $HOME/.apigeecli/bin/apigeecli --help
+
       - name: Create API bundle
         id: create-bundle
         working-directory: ${{ github.workspace }}
@@ -152,6 +151,7 @@ jobs:
             unzip -l proxy.zip
             rm -rf temp_bundle
           }
+          
           if [ -d "${{ inputs.proxy_directory }}" ]; then
             create_bundle "${{ inputs.proxy_directory }}"
           elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
@@ -160,6 +160,7 @@ jobs:
             echo "Error: Could not find apiproxy directory"
             exit 1
           fi
+
       - name: Upload and Get Revision
         id: upload
         env:
@@ -171,20 +172,24 @@ jobs:
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle -n "$PROXY_NAME" -p proxy.zip \
             --org "$APIGEE_ORG" \
             --token "$ACCESS_TOKEN")
+          
           echo "$IMPORT_OUTPUT"
+          
           LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision": "\K[^"]+')
+          
           if [ -z "$LATEST_REVISION" ]; then
             echo "Failed to get revision number"
             exit 1
           fi
+          
           echo "Latest revision: $LATEST_REVISION"
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_Proxy_To_Environment:
-    needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
+    needs: [check_deployment_type, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}
+        environment: ${{ fromJSON(needs.check_deployment_type.outputs.environments) }}
       fail-fast: false
       max-parallel: 1
     runs-on: ${{ inputs.runner }}
@@ -197,11 +202,13 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
+
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Deploy to Environment
         env:
           APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
@@ -214,7 +221,9 @@ jobs:
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
             exit 1
           fi
+          
           echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$APIGEE_ENV'"
+          
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
             --org "$APIGEE_ORG" \
@@ -224,77 +233,8 @@ jobs:
             --ovr \
             --wait
 
-  Request_Production_Approval:
-    needs: [Initialize_Environment_Configuration, Deploy_Proxy_To_Environment]
-    if: |
-      always() && inputs.is_production == 'false' && needs.Deploy_Proxy_To_Environment.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create Production Deployment Issue
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Production Deployment Ready - ${{ inputs.proxy_name }}`,
-              body: `
-            ## Production Deployment Request
-            A successful non-production deployment has completed and is ready for production deployment.
-
-            ### Deployment Details
-            - **Proxy Name:** ${{ inputs.proxy_name }}
-            - **Current Revision:** ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-            - **Non-Prod Environment:** ${{ inputs.environment_group }}-${{ inputs.environment_type }}
-            - **Run ID:** ${{ github.run_id }}
-
-            ### To Deploy to Production
-            1. Go to Actions → Apigee Proxy Deployment
-            2. Click "Run workflow"
-            3. Fill in the following:
-               - Proxy Name: ${{ inputs.proxy_name }}
-               - Environment Group: prod
-               - Environment Type: prod
-               - Is Production: true
-               - Non-Prod Revision: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-
-            [Start Production Deployment](https://github.com/${{ github.repository }}/actions/workflows/deploy.yml)
-            `
-            });
-
-  Deploy_Prod:
-    needs: [Initialize_Environment_Configuration, Setup_GCP_Authentication, Build_And_Upload_Proxy]
-    if: inputs.is_production == 'true'
-    environment: production
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - name: Authenticate to Google Cloud
-        id: auth
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider_prod }}
-          service_account: ${{ secrets.service_account_prod }}
-          token_format: 'access_token'
-      - name: Deploy to Production
-        env:
-          APIGEE_ORG: ${{ secrets.apigee_org_prod }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          LATEST_REVISION: ${{ inputs.non_prod_revision }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-        run: |
-          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to production"
-          $HOME/.apigeecli/bin/apigeecli apis deploy \
-            --name "$PROXY_NAME" \
-            --org "$APIGEE_ORG" \
-            --env "prod" \
-            --rev "$LATEST_REVISION" \
-            --token "$ACCESS_TOKEN" \
-            --ovr \
-            --wait
-
   Perform_Revision_Cleanup:
-    needs: [Deploy_Proxy_To_Environment, Deploy_Prod]
+    needs: [Deploy_Proxy_To_Environment]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
@@ -305,6 +245,7 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
+
       - name: Delete Older Revisions
         env:
           APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
@@ -313,9 +254,11 @@ jobs:
         run: |
           REVISIONS=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions")
+          
           readarray -t REVISIONS < <(echo "$REVISIONS" | jq -r '.[]' | sort -n)
           TOTAL_REVISIONS=${#REVISIONS[@]}
           KEEP_COUNT=5
+          
           if [ "$TOTAL_REVISIONS" -gt "$KEEP_COUNT" ]; then
             DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
             for ((i=0; i<DELETE_COUNT; i++)); do
@@ -326,7 +269,7 @@ jobs:
           fi
 
   Generate_Deployment_Report:
-    needs: [Validate_API_Proxy-ApigeeLint, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Deploy_Prod, Initialize_Environment_Configuration, Perform_Revision_Cleanup, Setup_GCP_Authentication]
+    needs: [Validate_API_Proxy-ApigeeLint, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, check_deployment_type, Perform_Revision_Cleanup, Setup_GCP_Authentication]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
