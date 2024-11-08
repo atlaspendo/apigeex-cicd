@@ -52,7 +52,6 @@ permissions:
   id-token: write
 
 jobs:
-
   Setup_GCP_Authentication:
     runs-on: ${{ inputs.runner }}
     outputs:
@@ -77,33 +76,27 @@ jobs:
         run: |
           GROUP="${{ inputs.environment_group }}"
           TYPES="${{ inputs.environment_type }}"
-          
           generate_env_list() {
             local group=$1
             local types=$2
             local envs="["
-            
             IFS=',' read -ra ENV_TYPES <<< "$types"
             local first=true
-            
             for type in "${ENV_TYPES[@]}"; do
               if [ "$first" = true ]; then
                 first=false
               else
                 envs="${envs},"
               fi
-              
               if [ "$group" = "default" ]; then
                 envs="${envs}\"${type}\""
               else
                 envs="${envs}\"${group}-${type}\""
               fi
             done
-            
             envs="${envs}]"
             echo "$envs"
           }
-          
           ENVIRONMENTS=$(generate_env_list "$GROUP" "$TYPES")
           echo "environments=$ENVIRONMENTS" >> $GITHUB_OUTPUT
 
@@ -113,15 +106,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '20'
-
       - name: Install apigeelint
         run: npm install -g apigeelint
-
       - name: Run apigeelint
         run: apigeelint -s ${{ inputs.proxy_directory }} -f table.js
 
@@ -133,7 +123,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Authenticate to Google Cloud
         id: auth
         uses: 'google-github-actions/auth@v1'
@@ -141,14 +130,12 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
-
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
           $HOME/.apigeecli/bin/apigeecli --help
-
       - name: Create API bundle
         id: create-bundle
         working-directory: ${{ github.workspace }}
@@ -165,7 +152,6 @@ jobs:
             unzip -l proxy.zip
             rm -rf temp_bundle
           }
-          
           if [ -d "${{ inputs.proxy_directory }}" ]; then
             create_bundle "${{ inputs.proxy_directory }}"
           elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
@@ -174,7 +160,6 @@ jobs:
             echo "Error: Could not find apiproxy directory"
             exit 1
           fi
-
       - name: Upload and Get Revision
         id: upload
         env:
@@ -186,16 +171,12 @@ jobs:
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle -n "$PROXY_NAME" -p proxy.zip \
             --org "$APIGEE_ORG" \
             --token "$ACCESS_TOKEN")
-          
           echo "$IMPORT_OUTPUT"
-          
           LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision": "\K[^"]+')
-          
           if [ -z "$LATEST_REVISION" ]; then
             echo "Failed to get revision number"
             exit 1
           fi
-          
           echo "Latest revision: $LATEST_REVISION"
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
@@ -216,13 +197,11 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
-
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-
       - name: Deploy to Environment
         env:
           APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
@@ -235,9 +214,7 @@ jobs:
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
             exit 1
           fi
-          
           echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$APIGEE_ENV'"
-          
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
             --org "$APIGEE_ORG" \
@@ -250,9 +227,7 @@ jobs:
   Request_Production_Approval:
     needs: [Initialize_Environment_Configuration, Deploy_Proxy_To_Environment]
     if: |
-      always() &&
-      inputs.is_production == 'false' &&
-      needs.Deploy_Proxy_To_Environment.result == 'success'
+      always() && inputs.is_production == 'false' && needs.Deploy_Proxy_To_Environment.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Create Production Deployment Issue
@@ -265,29 +240,27 @@ jobs:
               repo: context.repo.repo,
               title: `Production Deployment Ready - ${{ inputs.proxy_name }}`,
               body: `
-              ## Production Deployment Request
+            ## Production Deployment Request
+            A successful non-production deployment has completed and is ready for production deployment.
 
-              A successful non-production deployment has completed and is ready for production deployment.
+            ### Deployment Details
+            - **Proxy Name:** ${{ inputs.proxy_name }}
+            - **Current Revision:** ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
+            - **Non-Prod Environment:** ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+            - **Run ID:** ${{ github.run_id }}
 
-              ### Deployment Details
-              - **Proxy Name:** ${{ inputs.proxy_name }}
-              - **Current Revision:** ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-              - **Non-Prod Environment:** ${{ inputs.environment_group }}-${{ inputs.environment_type }}
-              - **Run ID:** ${{ github.run_id }}
+            ### To Deploy to Production
+            1. Go to Actions → Apigee Proxy Deployment
+            2. Click "Run workflow"
+            3. Fill in the following:
+               - Proxy Name: ${{ inputs.proxy_name }}
+               - Environment Group: prod
+               - Environment Type: prod
+               - Is Production: true
+               - Non-Prod Revision: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
 
-              ### To Deploy to Production
-
-              1. Go to Actions → Apigee Proxy Deployment
-              2. Click "Run workflow"
-              3. Fill in the following:
-                 - Proxy Name: ${{ inputs.proxy_name }}
-                 - Environment Group: prod
-                 - Environment Type: prod
-                 - Is Production: true
-                 - Non-Prod Revision: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-
-              [Start Production Deployment](https://github.com/${{ github.repository }}/actions/workflows/deploy.yml)
-              `
+            [Start Production Deployment](https://github.com/${{ github.repository }}/actions/workflows/deploy.yml)
+            `
             });
 
   Deploy_Prod:
@@ -303,7 +276,6 @@ jobs:
           workload_identity_provider: ${{ secrets.workload_identity_provider_prod }}
           service_account: ${{ secrets.service_account_prod }}
           token_format: 'access_token'
-
       - name: Deploy to Production
         env:
           APIGEE_ORG: ${{ secrets.apigee_org_prod }}
@@ -333,7 +305,6 @@ jobs:
           workload_identity_provider: ${{ secrets['workload_identity_provider', 'workload_identity_provider_prod'][inputs.is_production] }}
           service_account: ${{ secrets['service_account', 'service_account_prod'][inputs.is_production] }}
           token_format: 'access_token'
-
       - name: Delete Older Revisions
         env:
           APIGEE_ORG: ${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}
@@ -342,11 +313,9 @@ jobs:
         run: |
           REVISIONS=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$APIGEE_PROXY_NAME/revisions")
-          
           readarray -t REVISIONS < <(echo "$REVISIONS" | jq -r '.[]' | sort -n)
           TOTAL_REVISIONS=${#REVISIONS[@]}
           KEEP_COUNT=5
-          
           if [ "$TOTAL_REVISIONS" -gt "$KEEP_COUNT" ]; then
             DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
             for ((i=0; i<DELETE_COUNT; i++)); do
@@ -374,82 +343,82 @@ jobs:
           echo "|---------|--------|----------|" >> $GITHUB_STEP_SUMMARY
           echo "| Workload Identity Federation | $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Verified" || echo "❌ Failed") | Service Account Authentication |" >> $GITHUB_STEP_SUMMARY
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 🔍 Code Analysis" >> $GITHUB_STEP_SUMMARY
-  echo "| Validation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-  echo "|------------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-  echo "| API Proxy Lint Check | $([ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed") | Policy & Structure Validation |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Code Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API Proxy Lint Check | $([ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed") | Policy & Structure Validation |" >> $GITHUB_STEP_SUMMARY
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 📦 Bundle Operations" >> $GITHUB_STEP_SUMMARY
-  echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-  echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-  echo "| Proxy Bundle Creation | $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Created" || echo "❌ Failed") | Version: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Bundle Operations" >> $GITHUB_STEP_SUMMARY
+          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Proxy Bundle Creation | $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Created" || echo "❌ Failed") | Version: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }} |" >> $GITHUB_STEP_SUMMARY
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
-  echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
-  echo "|-------------|---------|--------------|" >> $GITHUB_STEP_SUMMARY
-  # Process each environment
-  IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
-  for env in "${ENVS[@]}"; do
-    if [ "${{ inputs.environment_group }}" == "default" ]; then
-      ENV_NAME="${env}"
-    else
-      ENV_NAME="${{ inputs.environment_group }}-${env}"
-    fi
-    if [ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ]; then
-      echo "| \`${ENV_NAME}\` | ✅ ACTIVE | \`OPTIMAL\` |" >> $GITHUB_STEP_SUMMARY
-    else
-      echo "| \`${ENV_NAME}\` | ❌ FAILED | \`CRITICAL\` |" >> $GITHUB_STEP_SUMMARY
-    fi
-  done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Status | Health Check |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|---------|--------------|" >> $GITHUB_STEP_SUMMARY
+          # Process each environment
+          IFS=',' read -ra ENVS <<< "${{ inputs.environment_type }}"
+          for env in "${ENVS[@]}"; do
+            if [ "${{ inputs.environment_group }}" == "default" ]; then
+              ENV_NAME="${env}"
+            else
+              ENV_NAME="${{ inputs.environment_group }}-${env}"
+            fi
+            if [ "${{ needs.Deploy_Proxy_To_Environment.result }}" == "success" ]; then
+              echo "| \`${ENV_NAME}\` | ✅ ACTIVE | \`OPTIMAL\` |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| \`${ENV_NAME}\` | ❌ FAILED | \`CRITICAL\` |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
-  echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-  echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-  echo "| Proxy | \`${{ inputs.proxy_name }}\` |" >> $GITHUB_STEP_SUMMARY
-  echo "| Revision | \`${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}\` |" >> $GITHUB_STEP_SUMMARY
-  echo "| Organization | \`${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}\` |" >> $GITHUB_STEP_SUMMARY
-  echo "| Group | \`${{ inputs.environment_group }}\` |" >> $GITHUB_STEP_SUMMARY
-  echo "| Environments | \`${{ inputs.environment_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Proxy | \`${{ inputs.proxy_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Revision | \`${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Organization | \`${{ secrets['apigee_org', 'apigee_org_prod'][inputs.is_production] }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Group | \`${{ inputs.environment_group }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environments | \`${{ inputs.environment_type }}\` |" >> $GITHUB_STEP_SUMMARY
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 🧹 Cleanup Operations" >> $GITHUB_STEP_SUMMARY
-  echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
-  echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
-  echo "| Old Revision Cleanup | $([ "${{ needs.Perform_Revision_Cleanup.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Keeping Latest 5 Revisions |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧹 Cleanup Operations" >> $GITHUB_STEP_SUMMARY
+          echo "| Operation | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Old Revision Cleanup | $([ "${{ needs.Perform_Revision_Cleanup.result }}" == "success" ] && echo "✅ Completed" || echo "❌ Failed") | Keeping Latest 5 Revisions |" >> $GITHUB_STEP_SUMMARY
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "## 📈 Final Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Final Status" >> $GITHUB_STEP_SUMMARY
 
-  if [ "${{ inputs.is_production }}" == "true" ]; then
-    DEPLOY_RESULT="${{ needs.Deploy_Prod.result }}"
-    ENV_TYPE="Production"
-  else
-    DEPLOY_RESULT="${{ needs.Deploy_Proxy_To_Environment.result }}"
-    ENV_TYPE="Non-Production"
-  fi
+          if [ "${{ inputs.is_production }}" == "true" ]; then
+            DEPLOY_RESULT="${{ needs.Deploy_Prod.result }}"
+            ENV_TYPE="Production"
+          else
+            DEPLOY_RESULT="${{ needs.Deploy_Proxy_To_Environment.result }}"
+            ENV_TYPE="Non-Production"
+          fi
 
-  if [ "$DEPLOY_RESULT" == "success" ]; then
-    echo "<table><tr><td><h3>✨ Deployment Successfully Completed</h3>" >> $GITHUB_STEP_SUMMARY
-    echo "<ul>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Authentication: ✅ Verified</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Code Quality: ✅ Standards Met</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Bundle: ✅ Created & Uploaded</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Deployment: ✅ Successfully Deployed</li>" >> $GITHUB_STEP_SUMMARY
-    echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-  else
-    echo "<table><tr><td><h3>⚠️ Deployment Issues Detected</h3>" >> $GITHUB_STEP_SUMMARY
-    echo "<ul>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Authentication: $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Code Quality: $([ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Bundle: $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-    echo "<li>Deployment: $([ "$DEPLOY_RESULT" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
-    echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
-  fi
+          if [ "$DEPLOY_RESULT" == "success" ]; then
+            echo "<table><tr><td><h3>✨ Deployment Successfully Completed</h3>" >> $GITHUB_STEP_SUMMARY
+            echo "<ul>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Authentication: ✅ Verified</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Code Quality: ✅ Standards Met</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Bundle: ✅ Created & Uploaded</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Deployment: ✅ Successfully Deployed</li>" >> $GITHUB_STEP_SUMMARY
+            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "<table><tr><td><h3>⚠️ Deployment Issues Detected</h3>" >> $GITHUB_STEP_SUMMARY
+            echo "<ul>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Authentication: $([ "${{ needs.Setup_GCP_Authentication.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Code Quality: $([ "${{ needs.Validate_API_Proxy-ApigeeLint.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Bundle: $([ "${{ needs.Build_And_Upload_Proxy.result }}" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "<li>Deployment: $([ "$DEPLOY_RESULT" == "success" ] && echo "✅ Passed" || echo "❌ Failed")</li>" >> $GITHUB_STEP_SUMMARY
+            echo "</ul></td></tr></table>" >> $GITHUB_STEP_SUMMARY
+          fi
 
-  echo "" >> $GITHUB_STEP_SUMMARY
-  echo "---" >> $GITHUB_STEP_SUMMARY
-  echo "<sub>Run ID: \`${{ github.run_id }}\` | Generated: $(date '+%H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "<sub>Run ID: \`${{ github.run_id }}\` | Generated: $(date '+%H:%M:%S')</sub>" >> $GITHUB_STEP_SUMMARY
