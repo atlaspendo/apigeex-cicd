@@ -285,12 +285,12 @@ jobs:
               --wait
 
   Perform_Revision_Cleanup:
-    needs: [Deploy_Proxy_To_Environment, Initialize_Environment_Configuration]
+    needs: [Deploy_Proxy_To_Environment]
     if: always()
     runs-on: ${{ inputs.runner }}
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.Initialize_Environment_Configuration.outputs.environments) }}
+        environment: ${{ fromJSON(inputs.environments) }}
       fail-fast: false
     steps:
       - name: Get GCP Token
@@ -324,18 +324,21 @@ jobs:
           command: |
             echo "Starting revision cleanup for environment: $ENVIRONMENT"
             
-            # First, get all revisions
-            echo "Fetching all revisions"
-            REVISIONS_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis list -o "$APIGEE_ORG" -t "$ACCESS_TOKEN" -i)
+            # Get all revisions for the proxy
+            echo "Fetching all revisions for proxy $PROXY_NAME"
+            $HOME/.apigeecli/bin/apigeecli apis list revisions \
+              -o "$APIGEE_ORG" \
+              -t "$ACCESS_TOKEN" \
+              -n "$PROXY_NAME" \
+              --json > revisions.json
             
             if [ $? -ne 0 ]; then
               echo "Failed to fetch revisions"
-              echo "Revisions output: $REVISIONS_OUTPUT"
               exit 1
             fi
             
-            # Extract revision numbers and sort them
-            REVISIONS=($(echo "$REVISIONS_OUTPUT" | grep -o '"revision": "[^"]*"' | cut -d'"' -f4 | sort -nr))
+            # Parse revisions and sort them numerically
+            REVISIONS=($(jq -r '.[]' revisions.json | sort -nr))
             
             echo "Found ${#REVISIONS[@]} total revisions"
             echo "All revisions: ${REVISIONS[*]}"
@@ -353,18 +356,25 @@ jobs:
                 OLD_REV="${REVISIONS[$i]}"
                 echo "Processing revision $OLD_REV"
                 
-                # Check if revision is deployed in any environment
-                DEPLOYMENT_CHECK=$($HOME/.apigeecli/bin/apigeecli apis list -o "$APIGEE_ORG" -t "$ACCESS_TOKEN" deployments "$PROXY_NAME")
+                # Check if revision is deployed in the current environment
+                DEPLOYMENT_CHECK=$($HOME/.apigeecli/bin/apigeecli apis get deployment \
+                  -o "$APIGEE_ORG" \
+                  -t "$ACCESS_TOKEN" \
+                  -n "$PROXY_NAME" \
+                  -e "$ENVIRONMENT" \
+                  --json)
                 
-                if [[ "$DEPLOYMENT_CHECK" == *"$OLD_REV"* ]]; then
-                  echo "Revision $OLD_REV is deployed, attempting to undeploy"
+                DEPLOYED_REV=$(echo "$DEPLOYMENT_CHECK" | jq -r '.revision[0].name')
+                
+                if [[ "$DEPLOYED_REV" == "$OLD_REV" ]]; then
+                  echo "Revision $OLD_REV is deployed in $ENVIRONMENT, undeploying..."
                   
                   $HOME/.apigeecli/bin/apigeecli apis undeploy \
                     -o "$APIGEE_ORG" \
                     -t "$ACCESS_TOKEN" \
                     -n "$PROXY_NAME" \
-                    --rev "$OLD_REV" \
-                    --env "$ENVIRONMENT"
+                    -e "$ENVIRONMENT" \
+                    -r "$OLD_REV"
                   
                   if [ $? -ne 0 ]; then
                     echo "Failed to undeploy revision $OLD_REV"
@@ -374,20 +384,42 @@ jobs:
                   echo "Successfully undeployed revision $OLD_REV"
                 fi
                 
-                # Delete the revision
-                echo "Attempting to delete revision $OLD_REV"
-                $HOME/.apigeecli/bin/apigeecli apis delete revision \
-                  -o "$APIGEE_ORG" \
-                  -t "$ACCESS_TOKEN" \
-                  -n "$PROXY_NAME" \
-                  --rev "$OLD_REV"
+                # Check if revision is deployed in any other environments
+                IS_DEPLOYED_ELSEWHERE=false
+                for ENV in $(echo "${{ inputs.environments }}" | jq -r '.[]'); do
+                  if [[ "$ENV" != "$ENVIRONMENT" ]]; then
+                    OTHER_ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli apis get deployment \
+                      -o "$APIGEE_ORG" \
+                      -t "$ACCESS_TOKEN" \
+                      -n "$PROXY_NAME" \
+                      -e "$ENV" \
+                      --json)
+                    
+                    OTHER_DEPLOYED_REV=$(echo "$OTHER_ENV_CHECK" | jq -r '.revision[0].name')
+                    if [[ "$OTHER_DEPLOYED_REV" == "$OLD_REV" ]]; then
+                      IS_DEPLOYED_ELSEWHERE=true
+                      break
+                    fi
+                  fi
+                done
                 
-                if [ $? -ne 0 ]; then
-                  echo "Failed to delete revision $OLD_REV"
-                  continue
+                if [[ "$IS_DEPLOYED_ELSEWHERE" == "false" ]]; then
+                  echo "Attempting to delete revision $OLD_REV"
+                  $HOME/.apigeecli/bin/apigeecli apis delete revision \
+                    -o "$APIGEE_ORG" \
+                    -t "$ACCESS_TOKEN" \
+                    -n "$PROXY_NAME" \
+                    -r "$OLD_REV"
+                  
+                  if [ $? -ne 0 ]; then
+                    echo "Failed to delete revision $OLD_REV"
+                    continue
+                  fi
+                  
+                  echo "Successfully deleted revision $OLD_REV"
+                else
+                  echo "Skipping deletion of revision $OLD_REV as it is deployed in other environments"
                 fi
-                
-                echo "Successfully deleted revision $OLD_REV"
               done
               
               echo "Cleanup process completed"
