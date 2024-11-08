@@ -179,25 +179,43 @@ jobs:
             exit 1
           fi
 
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
       - name: Upload and Get Revision
         id: upload
+        env:
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
         uses: nick-invision/retry@v2
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: |
-            APIGEE_ORG="${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}"
-            PROXY_NAME="${{ inputs.proxy_name }}"
-            ACCESS_TOKEN="${{ needs.Setup_GCP_Authentication.outputs.access_token }}"
+            echo "Using organization: $APIGEE_ORG"
+            echo "Using proxy name: $PROXY_NAME"
+            echo "Token available: ${{ steps.get-token.outputs.access_token != '' }}"
             
-            echo "Importing API proxy bundle to Apigee organization"
-            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle -n "$PROXY_NAME" -p proxy.zip \
+            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+              -n "$PROXY_NAME" \
+              -p proxy.zip \
               --org "$APIGEE_ORG" \
               --token "$ACCESS_TOKEN")
             
-            echo "$IMPORT_OUTPUT"
+            echo "Import output: $IMPORT_OUTPUT"
             
-            LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision": "\K[^"]+')
+            if [ $? -ne 0 ]; then
+              echo "Failed to import API proxy bundle"
+              exit 1
+            fi
+            
+            LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
             
             if [ -z "$LATEST_REVISION" ]; then
               echo "Failed to get revision number"
@@ -228,24 +246,34 @@ jobs:
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
       - name: Deploy to Environment
         uses: nick-invision/retry@v2
+        env:
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+          APIGEE_ENV: ${{ matrix.environment }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
+          REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: |
-            APIGEE_ORG="${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}"
-            APIGEE_ENV="${{ matrix.environment }}"
-            PROXY_NAME="${{ inputs.proxy_name }}"
-            ACCESS_TOKEN="${{ needs.Setup_GCP_Authentication.outputs.access_token }}"
-            REVISION="${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}"
-            
             if [ -z "$REVISION" ]; then
               echo "Error: REVISION is empty. Deployment cannot proceed."
               exit 1
             fi
             
             echo "Deploying proxy '$PROXY_NAME' revision '$REVISION' to environment '$APIGEE_ENV'"
+            echo "Using organization: $APIGEE_ORG"
+            echo "Token available: ${{ steps.get-token.outputs.access_token != '' }}"
             
             $HOME/.apigeecli/bin/apigeecli apis deploy \
               --name "$PROXY_NAME" \
