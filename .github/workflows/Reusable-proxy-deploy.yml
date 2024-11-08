@@ -40,8 +40,19 @@ on:
         description: "Status of the deployment"
         value: ${{ jobs.validate_deployment_inputs.outputs.deployment_status }}
     secrets:
-      inherit: true
-
+      APIGEE_ORG:
+        required: true
+      APIGEE_ORG_PROD:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+        
 permissions:
   contents: read
   id-token: write
