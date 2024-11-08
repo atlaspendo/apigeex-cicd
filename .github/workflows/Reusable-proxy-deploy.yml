@@ -324,13 +324,13 @@ jobs:
           command: |
             echo "Starting revision cleanup for environment: $ENVIRONMENT"
             
-            # Get deployments for this environment
+            # Get deployments for this environment using corrected apigeecli syntax
             echo "Fetching deployments for environment $ENVIRONMENT"
-            DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
-              --name "$PROXY_NAME" \
-              --org "$APIGEE_ORG" \
-              --env "$ENVIRONMENT" \
-              --token "$ACCESS_TOKEN")
+            DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list \
+              -o "$APIGEE_ORG" \
+              -t "$ACCESS_TOKEN" \
+              deployments "$PROXY_NAME" \
+              -e "$ENVIRONMENT")
             
             if [ $? -ne 0 ]; then
               echo "Failed to fetch deployments for environment $ENVIRONMENT"
@@ -357,11 +357,11 @@ jobs:
                 echo "Undeploying revision $OLD_REV from environment $ENVIRONMENT"
                 
                 $HOME/.apigeecli/bin/apigeecli apis undeploy \
-                  --name "$PROXY_NAME" \
-                  --org "$APIGEE_ORG" \
-                  --env "$ENVIRONMENT" \
-                  --rev "$OLD_REV" \
-                  --token "$ACCESS_TOKEN"
+                  -n "$PROXY_NAME" \
+                  -o "$APIGEE_ORG" \
+                  -e "$ENVIRONMENT" \
+                  -v "$OLD_REV" \
+                  -t "$ACCESS_TOKEN"
                 
                 if [ $? -ne 0 ]; then
                   echo "Failed to undeploy revision $OLD_REV from $ENVIRONMENT"
@@ -372,11 +372,11 @@ jobs:
                 
                 # Delete the undeployed revision
                 echo "Deleting revision $OLD_REV"
-                $HOME/.apigeecli/bin/apigeecli apis delete revision \
-                  --name "$PROXY_NAME" \
-                  --org "$APIGEE_ORG" \
-                  --rev "$OLD_REV" \
-                  --token "$ACCESS_TOKEN"
+                $HOME/.apigeecli/bin/apigeecli apis delete \
+                  -n "$PROXY_NAME" \
+                  -o "$APIGEE_ORG" \
+                  -v "$OLD_REV" \
+                  -t "$ACCESS_TOKEN"
                 
                 if [ $? -ne 0 ]; then
                   echo "Failed to delete revision $OLD_REV"
@@ -390,16 +390,6 @@ jobs:
             else
               echo "No cleanup needed. Current revision count ($CURRENT_COUNT) <= keep count ($KEEP_COUNT)"
             fi
-            
-            # Verify final state
-            FINAL_DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
-              --name "$PROXY_NAME" \
-              --org "$APIGEE_ORG" \
-              --env "$ENVIRONMENT" \
-              --token "$ACCESS_TOKEN")
-            
-            FINAL_COUNT=$(echo "$FINAL_DEPLOYMENTS" | grep -o '"revision": "[^"]*"' | wc -l)
-            echo "Final revision count in $ENVIRONMENT: $FINAL_COUNT"
 
       - name: Add to Deployment Summary
         run: |
@@ -409,7 +399,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
   Generate_Deployment_Report:
-    needs: [Validate_API_Proxy, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Perform_Revision_Cleanup]
+    needs: [Validate_API_Proxy, Build_And_Upload_Proxy, Deploy_Proxy_To_Environment, Perform_Revision_Cleanup, Setup_GCP_Authentication]
     if: always()
     runs-on: ${{ inputs.runner }}
     steps:
