@@ -375,7 +375,7 @@ jobs:
           echo "Waiting 10 seconds after verification..."
           sleep 5
 
-  # Production deployment jobs
+ # Production deployment jobs
   Setup_Prod_Auth:
     needs: [validate_deployment_inputs]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production == true
@@ -395,7 +395,9 @@ jobs:
     needs: [Setup_Prod_Auth]
     if: inputs.is_production == true
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.deployment_url }}
     steps:
       - name: Install apigeecli
         run: |
@@ -404,6 +406,7 @@ jobs:
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
       - name: Deploy to Production
+        id: deployment
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
@@ -420,5 +423,6 @@ jobs:
             --token "$ACCESS_TOKEN" \
             --ovr \
             --wait
-            --ovr \
-            --wait
+
+          # Set deployment URL for environment
+          echo "deployment_url=https://$APIGEE_ORG-prod.apigee.net/$PROXY_NAME" >> $GITHUB_OUTPUT
