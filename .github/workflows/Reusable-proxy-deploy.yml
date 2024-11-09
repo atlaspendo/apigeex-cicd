@@ -267,7 +267,7 @@ jobs:
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy, validate_deployment_inputs]
+    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     strategy:
       matrix:
