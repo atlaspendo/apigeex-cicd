@@ -329,11 +329,15 @@ jobs:
       !inputs.is_production && 
       needs.Deploy_Proxy_To_Environment.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
     steps:
       - name: Create Production Deployment Issue
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          permissions: write-all
           script: |
             const issueBody = `
             ## Production Deployment Request
