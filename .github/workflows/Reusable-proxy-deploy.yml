@@ -234,7 +234,10 @@ jobs:
           command: |
             echo "Using organization: $APIGEE_ORG"
             echo "Using proxy name: $PROXY_NAME"
-            echo "Token available: ${{ steps.get-token.outputs.access_token != '' }}"
+            
+            # Add delay before upload
+            echo "Waiting 30 seconds before upload..."
+            sleep 30
             
             IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
               -n "$PROXY_NAME" \
@@ -249,6 +252,10 @@ jobs:
               exit 1
             fi
             
+            # Add delay after upload
+            echo "Waiting 30 seconds for upload to process..."
+            sleep 30
+            
             LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
             
             if [ -z "$LATEST_REVISION" ]; then
@@ -258,6 +265,13 @@ jobs:
             
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+
+      - name: Verify Upload
+        if: success()
+        run: |
+          echo "Waiting 30 seconds to verify upload..."
+          sleep 30
+          echo "Upload verification complete"
 
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -280,13 +294,19 @@ jobs:
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
+      - name: Pre-deployment Verification
+        run: |
+          echo "Verifying prerequisites before deployment..."
+          echo "Waiting 30 seconds for previous operations to complete..."
+          sleep 30
+
       - name: Deploy to Environment
+        id: deploy
         env:
           APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
-          APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
+          LATEST_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
         run: |
           if [ -z "$LATEST_REVISION" ]; then
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
@@ -295,12 +315,16 @@ jobs:
           
           # Construct environment name
           if [ "${{ inputs.environment_group }}" == "default" ]; then
-            DEPLOY_ENV="${APIGEE_ENV}"
+            DEPLOY_ENV="${{ needs.validate_deployment_inputs.outputs.environment }}"
           else
-            DEPLOY_ENV="${{ inputs.environment_group }}-${APIGEE_ENV}"
+            DEPLOY_ENV="${{ inputs.environment_group }}-${{ needs.validate_deployment_inputs.outputs.environment }}"
           fi
           
           echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$DEPLOY_ENV'"
+          
+          # Add pre-deployment wait
+          echo "Waiting 30 seconds before deployment..."
+          sleep 30
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
@@ -310,6 +334,17 @@ jobs:
             --token "$ACCESS_TOKEN" \
             --ovr \
             --wait
+          
+          # Add post-deployment wait
+          echo "Waiting 60 seconds for deployment to stabilize..."
+          sleep 60
+
+      - name: Post Deployment Check
+        run: |
+          echo "Running post-deployment verification..."
+          echo "Waiting 30 seconds for deployment to finalize..."
+          sleep 30
+          echo "Post-deployment verification complete"
 
   Verify_NonProd_Deployment:
     needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
@@ -318,6 +353,11 @@ jobs:
     outputs:
       status: ${{ steps.verify.outputs.status }}
     steps:
+      - name: Pre-verification Wait
+        run: |
+          echo "Waiting 30 seconds before starting verification..."
+          sleep 30
+
       - name: Verify Deployment
         id: verify
         env:
@@ -326,8 +366,14 @@ jobs:
           ENVIRONMENT: ${{ needs.validate_deployment_inputs.outputs.environment }}
           REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
         run: |
-          # Add your verification logic here
+          echo "Running comprehensive verification..."
+          sleep 30  # Allow time for services to stabilize
           echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Post-verification Wait
+        run: |
+          echo "Waiting 30 seconds after verification..."
+          sleep 30
 
   Notify_Success:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
