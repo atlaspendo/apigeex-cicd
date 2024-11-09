@@ -375,83 +375,6 @@ jobs:
           echo "Waiting 10 seconds after verification..."
           sleep 5
 
-  Notify_Success:
-    needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
-    if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create Deployment Review Issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const repo_url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`;
-            const issueBody = `
-            ## Production Deployment Review Required
-            
-            Non-Production deployment has completed successfully! 🎉
-            
-            ### Deployment Details
-            - **Proxy Name:** ${{ inputs.proxy_name }}
-            - **Current Revision:** ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            - **Non-Prod Environment:** ${{ inputs.environment_group }}-${{ needs.validate_deployment_inputs.outputs.environment }}
-            
-            ### 🚀 Steps to Approve Production Deployment:
-            1. Go to [GitHub Actions](${repo_url}/actions)
-            2. Click "Review pending deployments"
-            3. Review the changes and deployment details
-            4. Click "Approve and deploy" button
-            
-            ### Direct Links:
-            - [Review Deployment](${repo_url}/actions)
-            - [Deployment History](${repo_url}/deployments)
-            
-            > **Note:** Please verify the deployment in non-prod environment before approving for production.
-            
-            ### Need to deploy to production manually?
-            If you prefer to deploy manually, follow these steps:
-            1. Go to [GitHub Actions](${repo_url}/actions)
-            2. Click "Apigee Proxy Deployment"
-            3. Click "Run workflow"
-            4. Configure:
-               - Proxy Name: ${{ inputs.proxy_name }}
-               - Environment Group: prod
-               - Environment Type: prod
-               - Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            `;
-
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🔄 Production Deployment Review - ${{ inputs.proxy_name }}`,
-              body: issueBody,
-              labels: ['deployment', 'needs-review'],
-              assignees: [context.actor]
-            });
-
-      - name: Send Deployment Notification
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const notificationBody = {
-              title: "Production Deployment Ready for Review",
-              summary: `${{ inputs.proxy_name }} is ready for production deployment`,
-              conclusion: "success",
-              details_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/workflows`
-            };
-
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: "Deployment Review Required",
-              head_sha: context.sha,
-              status: "completed",
-              conclusion: "success",
-              output: {
-                title: notificationBody.title,
-                summary: notificationBody.summary
-              }
-            });
   # Production deployment jobs
   Setup_Prod_Auth:
     needs: [validate_deployment_inputs]
@@ -495,5 +418,7 @@ jobs:
             --env "prod" \
             --rev "$REVISION" \
             --token "$ACCESS_TOKEN" \
+            --ovr \
+            --wait
             --ovr \
             --wait
