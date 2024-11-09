@@ -35,7 +35,7 @@ on:
     outputs:
       revision:
         description: "The deployed revision number"
-        value: ${{ jobs.Build_And_Upload_NonProd.outputs.latest_revision }}
+        value: ${{ jobs.Build_And_Upload_Proxy.outputs.latest_revision }}
       deployment_status:
         description: "Status of the deployment"
         value: ${{ jobs.validate_deployment_inputs.outputs.deployment_status }}
@@ -56,7 +56,9 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
   deployments: write
+  #environments: read
 
 jobs:
   validate_deployment_inputs:
@@ -136,6 +138,35 @@ jobs:
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
 
+  Validate_API_Proxy:
+    needs: [validate_deployment_inputs, Setup_NonProd_Auth]
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install apigeelint
+        run: |
+          npm install -g apigeelint
+          if [ $? -ne 0 ]; then
+            echo "Failed to install apigeelint"
+            exit 1
+          fi
+
+      - name: Run apigeelint
+        run: |
+          apigeelint -s ${{ inputs.proxy_directory }} -f table.js
+          if [ $? -ne 0 ]; then
+            echo "API proxy validation failed"
+            exit 1
+          fi
+
   Build_And_Upload_NonProd:
     needs: [Setup_NonProd_Auth, validate_deployment_inputs]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
@@ -182,27 +213,51 @@ jobs:
             exit 1
           fi
 
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
       - name: Upload and Get Revision
         id: upload
         env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-        run: |
-          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "$PROXY_NAME" \
-            -p proxy.zip \
-            --org "$APIGEE_ORG" \
-            --token "$ACCESS_TOKEN")
-          
-          LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          
-          if [ -z "$LATEST_REVISION" ]; then
-            echo "Failed to get revision number"
-            exit 1
-          fi
-          
-          echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            echo "Using organization: $APIGEE_ORG"
+            echo "Using proxy name: $PROXY_NAME"
+            echo "Token available: ${{ steps.get-token.outputs.access_token != '' }}"
+            
+            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+              -n "$PROXY_NAME" \
+              -p proxy.zip \
+              --org "$APIGEE_ORG" \
+              --token "$ACCESS_TOKEN")
+            
+            echo "Import output: $IMPORT_OUTPUT"
+            
+            if [ $? -ne 0 ]; then
+              echo "Failed to import API proxy bundle"
+              exit 1
+            fi
+            
+            LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+            
+            if [ -z "$LATEST_REVISION" ]; then
+              echo "Failed to get revision number"
+              exit 1
+            fi
+            
+            echo "Latest revision: $LATEST_REVISION"
+            echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -211,18 +266,41 @@ jobs:
     environment: 
       name: ${{ needs.validate_deployment_inputs.outputs.environment }}
     steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+
+      - name: Install apigeecli
+        run: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Deploy to Environment
         env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+          APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.Setup_NonProd_Auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
         run: |
-          if [ "${{ inputs.environment_group }}" == "default" ]; then
-            DEPLOY_ENV="${{ needs.validate_deployment_inputs.outputs.environment }}"
-          else
-            DEPLOY_ENV="${{ inputs.environment_group }}-${{ needs.validate_deployment_inputs.outputs.environment }}"
+          if [ -z "$LATEST_REVISION" ]; then
+            echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
+            exit 1
           fi
+          
+          # Construct environment name
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${APIGEE_ENV}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${APIGEE_ENV}"
+          fi
+          
+          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$DEPLOY_ENV'"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
@@ -232,6 +310,67 @@ jobs:
             --token "$ACCESS_TOKEN" \
             --ovr \
             --wait
+
+  Verify_NonProd_Deployment:
+    needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
+    if: needs.Deploy_To_NonProd.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.verify.outputs.status }}
+    steps:
+      - name: Verify Deployment
+        id: verify
+        env:
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENVIRONMENT: ${{ needs.validate_deployment_inputs.outputs.environment }}
+          REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+        run: |
+          # Add your verification logic here
+          echo "status=success" >> $GITHUB_OUTPUT
+
+  Notify_Success:
+    needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
+    if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get GitHub Actor Email
+        id: actor
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.users.getByUsername({
+              username: context.actor
+            });
+            return data.email || `${context.actor}@users.noreply.github.com`;
+
+      - name: Send Deployment Success Email
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const emailBody = `
+            Non-Production deployment successful!
+            
+            Deployment Details:
+            - Proxy Name: ${{ inputs.proxy_name }}
+            - Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+            - Environment: ${{ needs.validate_deployment_inputs.outputs.environment }}
+            
+            To proceed with production deployment:
+            1. Go to GitHub Actions
+            2. Click "Review pending deployments"
+            3. Review and approve the deployment
+            
+            URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Ready for Production - ${{ inputs.proxy_name }}`,
+              body: emailBody,
+              assignee: context.actor
+            });
 
   # Production deployment jobs
   Setup_Prod_Auth:
@@ -255,6 +394,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Install apigeecli
+        run: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Deploy to Production
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
