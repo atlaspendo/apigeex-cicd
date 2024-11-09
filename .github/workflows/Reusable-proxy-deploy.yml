@@ -375,12 +375,15 @@ jobs:
           echo "Waiting 10 seconds after verification..."
           sleep 5
           
+  # After successful non-prod deployment
   Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
     if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
     runs-on: ubuntu-latest
     environment:
       name: production-approval
+    outputs:
+      revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
     steps:
       - name: Set Deployment Status
         run: |
@@ -389,11 +392,9 @@ jobs:
           echo "Proxy Name: ${{ inputs.proxy_name }}"
           echo "Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
 
-          
- # Production deployment jobs
   Setup_Prod_Auth:
-    needs: [validate_deployment_inputs]
-    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production == true
+    needs: [Request_Production_Approval]
+    if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       access_token: ${{ steps.auth.outputs.access_token }}
@@ -408,7 +409,7 @@ jobs:
 
   Deploy_To_Production:
     needs: [Setup_Prod_Auth, Request_Production_Approval]
-    if: inputs.is_production == true
+    if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -426,7 +427,7 @@ jobs:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ needs.Setup_Prod_Auth.outputs.access_token }}
-          REVISION: ${{ inputs.non_prod_revision }}
+          REVISION: ${{ needs.Request_Production_Approval.outputs.revision }}
         run: |
           echo "Deploying to production environment"
           
