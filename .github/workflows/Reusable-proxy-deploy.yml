@@ -269,7 +269,7 @@ jobs:
   Deploy_Proxy_To_Environment:
     needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
     if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     outputs:
       deployment_success: ${{ steps.deploy.outputs.success }}
     steps:
@@ -292,8 +292,9 @@ jobs:
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      - name: Deploy Proxy
+      - name: Deploy to Environment
         id: deploy
+        uses: nick-invision/retry@v2
         env:
           APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
           PROXY_NAME: ${{ inputs.proxy_name }}
@@ -301,83 +302,126 @@ jobs:
           ENV_TYPE: ${{ inputs.environment_type }}
           ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
           REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-        uses: nick-invision/retry@v2
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: |
-            set -e
+            echo "Starting deployment process..."
+            echo "Proxy Name: $PROXY_NAME"
+            echo "Environment Group: $ENV_GROUP"
+            echo "Environment Type(s): $ENV_TYPE"
+            echo "Revision: $REVISION"
+            echo "Organization: $APIGEE_ORG"
             
-            # Split environment types
+            if [ -z "$REVISION" ]; then
+              echo "Error: REVISION is empty. Deployment cannot proceed."
+              exit 1
+            fi
+            
+            # Function to deploy to a single environment
+            deploy_to_env() {
+              local deploy_env=$1
+              echo "Deploying proxy '$PROXY_NAME' revision '$REVISION' to environment '$deploy_env'"
+              
+              # Check if proxy is already deployed
+              CURRENT_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+                -o "$APIGEE_ORG" \
+                -t "$ACCESS_TOKEN" \
+                -n "$PROXY_NAME" \
+                -e "$deploy_env" \
+                --json)
+              
+              CURRENT_REV=$(echo "$CURRENT_DEPLOYMENT" | jq -r '.[]?.revision[0]?.name // empty')
+              
+              if [ "$CURRENT_REV" == "$REVISION" ]; then
+                echo "Revision $REVISION is already deployed to $deploy_env"
+                return 0
+              fi
+              
+              echo "Deploying revision $REVISION to $deploy_env"
+              $HOME/.apigeecli/bin/apigeecli apis deploy \
+                -n "$PROXY_NAME" \
+                -o "$APIGEE_ORG" \
+                -e "$deploy_env" \
+                -r "$REVISION" \
+                -t "$ACCESS_TOKEN" \
+                --ovr \
+                --wait
+              
+              return $?
+            }
+            
+            # Split environment types and deploy to each
             IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
             DEPLOY_SUCCESS=true
             
             for env_type in "${ENV_TYPES[@]}"; do
               env_type=$(echo "$env_type" | xargs)
               
-              # Construct environment name
               if [ "$ENV_GROUP" == "default" ]; then
                 DEPLOY_ENV="${env_type}"
               else
                 DEPLOY_ENV="${ENV_GROUP}-${env_type}"
               fi
               
-              echo "---"
-              echo "Deploying to environment: $DEPLOY_ENV"
-              echo "Organization: $APIGEE_ORG"
-              echo "Proxy Name: $PROXY_NAME"
-              echo "Revision: $REVISION"
-              
-              # List available environments for debugging
-              echo "Available environments:"
-              $HOME/.apigeecli/bin/apigeecli environments list \
-                --org "$APIGEE_ORG" \
-                --token "$ACCESS_TOKEN"
+              echo "Processing deployment for environment: $DEPLOY_ENV"
               
               # Verify environment exists
-              ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli environments get \
-                --org "$APIGEE_ORG" \
-                --env "$DEPLOY_ENV" \
-                --token "$ACCESS_TOKEN" 2>&1)
-              
-              if [ $? -ne 0 ]; then
-                echo "Error: Environment $DEPLOY_ENV not found"
-                echo "Environment check output: $ENV_CHECK"
-                exit 1
-              fi
-              
-              echo "Environment $DEPLOY_ENV exists, proceeding with deployment..."
-              
-              # Deploy the proxy with full error output
-              DEPLOY_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis deploy \
-                -n "$PROXY_NAME" \
+              ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli environments list \
                 -o "$APIGEE_ORG" \
-                -e "$DEPLOY_ENV" \
-                -r "$REVISION" \
                 -t "$ACCESS_TOKEN" \
-                --ovr \
-                --wait 2>&1)
+                --json)
               
-              DEPLOY_STATUS=$?
-              
-              echo "Deployment output: $DEPLOY_OUTPUT"
-              
-              if [ $DEPLOY_STATUS -ne 0 ]; then
-                echo "Failed to deploy to $DEPLOY_ENV"
-                echo "Deploy command exit code: $DEPLOY_STATUS"
+              if [[ ! "$ENV_CHECK" == *"$DEPLOY_ENV"* ]]; then
+                echo "Error: Environment $DEPLOY_ENV does not exist in organization"
                 DEPLOY_SUCCESS=false
-                exit 1
+                continue
               fi
               
-              echo "Successfully deployed to $DEPLOY_ENV"
+              # Deploy to environment
+              if ! deploy_to_env "$DEPLOY_ENV"; then
+                DEPLOY_SUCCESS=false
+                echo "Deployment failed for environment $DEPLOY_ENV"
+                continue
+              fi
+              
+              # Verify deployment
+              VERIFY_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+                -o "$APIGEE_ORG" \
+                -t "$ACCESS_TOKEN" \
+                -n "$PROXY_NAME" \
+                -e "$DEPLOY_ENV" \
+                --json)
+              
+              DEPLOYED_REV=$(echo "$VERIFY_DEPLOYMENT" | jq -r '.[]?.revision[0]?.name // empty')
+              
+              if [ "$DEPLOYED_REV" != "$REVISION" ]; then
+                echo "Verification failed: Expected revision $REVISION, but found $DEPLOYED_REV in $DEPLOY_ENV"
+                DEPLOY_SUCCESS=false
+                continue
+              fi
+              
+              echo "Verified deployment of revision $REVISION in environment $DEPLOY_ENV"
             done
             
             if [ "$DEPLOY_SUCCESS" = true ]; then
               echo "success=true" >> $GITHUB_OUTPUT
+              echo "All deployments completed successfully"
             else
               echo "success=false" >> $GITHUB_OUTPUT
+              echo "One or more deployments failed"
               exit 1
             fi
+
+      - name: Add Deployment Details to Summary
+        if: always()
+        run: |
+          echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Proxy Name:** ${{ inputs.proxy_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Revision:** ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment Group:** ${{ inputs.environment_group }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment Type:** ${{ inputs.environment_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** $([ "${{ steps.deploy.outputs.success }}" == "true" ] && echo "✅ Success" || echo "❌ Failed")" >> $GITHUB_STEP_SUMMARY
 
   Request_Production_Approval:
     needs: [Deploy_Proxy_To_Environment]
