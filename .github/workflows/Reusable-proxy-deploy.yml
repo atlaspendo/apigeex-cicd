@@ -58,7 +58,7 @@ permissions:
   id-token: write
   issues: write
   deployments: write
-  environments: read
+  #environments: read
 
 jobs:
   validate_deployment_inputs:
