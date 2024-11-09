@@ -266,33 +266,7 @@ jobs:
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-  Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
-    if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
-    runs-on: ubuntu-latest
-    outputs:
-      deployment_success: ${{ steps.deploy.outputs.success }}
-    steps:
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
-          token_format: 'access_token'
-
-      - name: Install apigeecli
-        id: install-cli
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: |
-            mkdir -p $HOME/.apigeecli/bin
-            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-
-      - name: Deploy Proxy
+ - name: Deploy Proxy
         id: deploy
         env:
           APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
@@ -329,37 +303,17 @@ jobs:
               echo "---"
               echo "Deploying to environment: $DEPLOY_ENV"
               
-              # Verify environment exists
-              $HOME/.apigeecli/bin/apigeecli environments get \
+              # Deploy using correct flags
+              $HOME/.apigeecli/bin/apigeecli apis deploy \
+                -n "$PROXY_NAME" \
                 -o "$APIGEE_ORG" \
                 -e "$DEPLOY_ENV" \
-                -t "$ACCESS_TOKEN"
-              
-              if [ $? -ne 0 ]; then
-                echo "Error: Environment $DEPLOY_ENV not found"
-                DEPLOY_SUCCESS=false
-                continue
-              fi
-              
-              # Check current deployments using correct syntax
-              CURRENT_DEPLOYMENTS=$($HOME/.apigeecli/bin/apigeecli apis list \
-                --org "$APIGEE_ORG" \
-                --token "$ACCESS_TOKEN" \
-                --prefix "$PROXY_NAME" \
-                --json || true)
-              
-              # Deploy the proxy
-              DEPLOY_RESULT=$($HOME/.apigeecli/bin/apigeecli apis deploy \
-                --name "$PROXY_NAME" \
-                --org "$APIGEE_ORG" \
-                --env "$DEPLOY_ENV" \
-                --rev "$REVISION" \
-                --token "$ACCESS_TOKEN" \
-                --override \
-                --wait 2>&1)
+                -v "$REVISION" \
+                -t "$ACCESS_TOKEN" \
+                --ovr \
+                --wait
               
               DEPLOY_STATUS=$?
-              echo "Deployment output: $DEPLOY_RESULT"
               
               if [ $DEPLOY_STATUS -ne 0 ]; then
                 echo "Failed to deploy to $DEPLOY_ENV"
@@ -370,12 +324,12 @@ jobs:
               
               echo "Successfully deployed to $DEPLOY_ENV"
               
-              # Verify deployment using correct syntax
-              sleep 5  # Wait a bit for deployment to stabilize
-              VERIFY_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list \
-                --org "$APIGEE_ORG" \
-                --token "$ACCESS_TOKEN" \
-                --prefix "$PROXY_NAME" \
+              # Verify deployment
+              VERIFY_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+                -o "$APIGEE_ORG" \
+                -t "$ACCESS_TOKEN" \
+                -n "$PROXY_NAME" \
+                -e "$DEPLOY_ENV" \
                 --json || true)
               
               if [[ ! "$VERIFY_DEPLOYMENT" == *"$REVISION"* ]]; then
