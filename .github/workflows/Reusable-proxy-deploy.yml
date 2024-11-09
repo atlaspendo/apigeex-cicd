@@ -374,7 +374,22 @@ jobs:
         run: |
           echo "Waiting 10 seconds after verification..."
           sleep 5
+          
+  Request_Production_Approval:
+    needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
+    if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: production-approval
+    steps:
+      - name: Set Deployment Status
+        run: |
+          echo "Non-prod deployment successful"
+          echo "Waiting for production approval"
+          echo "Proxy Name: ${{ inputs.proxy_name }}"
+          echo "Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
 
+          
  # Production deployment jobs
   Setup_Prod_Auth:
     needs: [validate_deployment_inputs]
@@ -392,7 +407,7 @@ jobs:
           token_format: 'access_token'
 
   Deploy_To_Production:
-    needs: [Setup_Prod_Auth]
+    needs: [Setup_Prod_Auth, Request_Production_Approval]
     if: inputs.is_production == true
     runs-on: ubuntu-latest
     environment:
@@ -424,5 +439,4 @@ jobs:
             --ovr \
             --wait
 
-          # Set deployment URL for environment
           echo "deployment_url=https://$APIGEE_ORG-prod.apigee.net/$PROXY_NAME" >> $GITHUB_OUTPUT
