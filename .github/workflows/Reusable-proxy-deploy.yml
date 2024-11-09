@@ -266,22 +266,23 @@ jobs:
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-  Deploy_to_Environment:
+  Deploy_Proxy_To_Environment:
     needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
+    if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.Prepare_Environment_List.outputs.environments) }}
+        environment: ${{ inputs.environment_type }}
       fail-fast: false
       max-parallel: 1
-    runs-on: ${{ inputs.runner }}
+    runs-on: ubuntu-latest
     environment: ${{ matrix.environment }}
     steps:
       - name: Authenticate to Google Cloud
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ secrets.workload_identity_provider }}
-          service_account: ${{ secrets.service_account }}
+          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
 
       - name: Install apigeecli
@@ -292,30 +293,37 @@ jobs:
 
       - name: Deploy to Environment
         env:
-          APIGEE_ORG: ${{ secrets.apigee_org }}
+          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
           APIGEE_ENV: ${{ matrix.environment }}
           PROXY_NAME: ${{ inputs.proxy_name }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Prepare_and_Upload.outputs.latest_revision }}
+          LATEST_REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
         run: |
           if [ -z "$LATEST_REVISION" ]; then
             echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
             exit 1
           fi
           
-          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$APIGEE_ENV'"
+          # Construct environment name
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${APIGEE_ENV}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${APIGEE_ENV}"
+          fi
+          
+          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$DEPLOY_ENV'"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
             --org "$APIGEE_ORG" \
-            --env "$APIGEE_ENV" \
+            --env "$DEPLOY_ENV" \
             --rev "$LATEST_REVISION" \
             --token "$ACCESS_TOKEN" \
             --ovr \
             --wait
 
   Request_Production_Approval:
-    needs: [Deploy_to_Environment]
+    needs: [Deploy_Proxy_To_Environment]
     if: |
       always() && 
       !inputs.is_production && 
