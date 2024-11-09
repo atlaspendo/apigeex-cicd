@@ -271,7 +271,7 @@ jobs:
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     strategy:
       matrix:
-        environment: ${{ fromJSON(needs.validate_deployment_inputs.outputs.environments) }}
+        environment: ['test-env']
       fail-fast: false
       max-parallel: 1
     runs-on: ubuntu-latest
