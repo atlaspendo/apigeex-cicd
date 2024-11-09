@@ -267,11 +267,11 @@ jobs:
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy,validate_deployment_inputs]
-    if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
+    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy, validate_deployment_inputs]
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     strategy:
       matrix:
-        environment: ${{ fromJson(needs.Prepare_Environment_List.outputs.environments) }}
+        environment: ${{ fromJson(format('["%s"]', inputs.environment_type)) }}
       fail-fast: false
       max-parallel: 1
     runs-on: ubuntu-latest
