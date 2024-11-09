@@ -374,12 +374,12 @@ jobs:
               echo "Processing deployment for environment: $DEPLOY_ENV"
               
               # Verify environment exists
-              ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli environments list \
+              ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli environments get \
                 -o "$APIGEE_ORG" \
                 -t "$ACCESS_TOKEN" \
-                --json)
+                -e "$DEPLOY_ENV" 2>/dev/null)
               
-              if [[ ! "$ENV_CHECK" == *"$DEPLOY_ENV"* ]]; then
+              if [ $? -ne 0 ]; then
                 echo "Error: Environment $DEPLOY_ENV does not exist in organization"
                 DEPLOY_SUCCESS=false
                 continue
