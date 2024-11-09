@@ -301,44 +301,83 @@ jobs:
           ENV_TYPE: ${{ inputs.environment_type }}
           ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
           REVISION: ${{ needs.Build_And_Upload_Proxy.outputs.latest_revision }}
-        run: |
-          IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
-          DEPLOY_SUCCESS=true
-
-          for env_type in "${ENV_TYPES[@]}"; do
-            env_type=$(echo "$env_type" | xargs)
-            DEPLOY_ENV="${ENV_GROUP}-${env_type}"
-
-            if [ "$ENV_GROUP" == "default" ]; then
-              DEPLOY_ENV="${env_type}"
-            fi
-
-            echo "Deploying to environment: $DEPLOY_ENV"
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -e
             
-            $HOME/.apigeecli/bin/apigeecli apis deploy \
-              -n "$PROXY_NAME" \
-              -o "$APIGEE_ORG" \
-              -e "$DEPLOY_ENV" \
-              -r "$REVISION" \
-              -t "$ACCESS_TOKEN" \
-              --ovr \
-              --wait
-
-            if [ $? -ne 0 ]; then
-              echo "Failed to deploy to $DEPLOY_ENV"
-              DEPLOY_SUCCESS=false
-              break
+            # Split environment types
+            IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
+            DEPLOY_SUCCESS=true
+            
+            for env_type in "${ENV_TYPES[@]}"; do
+              env_type=$(echo "$env_type" | xargs)
+              
+              # Construct environment name
+              if [ "$ENV_GROUP" == "default" ]; then
+                DEPLOY_ENV="${env_type}"
+              else
+                DEPLOY_ENV="${ENV_GROUP}-${env_type}"
+              fi
+              
+              echo "---"
+              echo "Deploying to environment: $DEPLOY_ENV"
+              echo "Organization: $APIGEE_ORG"
+              echo "Proxy Name: $PROXY_NAME"
+              echo "Revision: $REVISION"
+              
+              # List available environments for debugging
+              echo "Available environments:"
+              $HOME/.apigeecli/bin/apigeecli environments list \
+                --org "$APIGEE_ORG" \
+                --token "$ACCESS_TOKEN"
+              
+              # Verify environment exists
+              ENV_CHECK=$($HOME/.apigeecli/bin/apigeecli environments get \
+                --org "$APIGEE_ORG" \
+                --env "$DEPLOY_ENV" \
+                --token "$ACCESS_TOKEN" 2>&1)
+              
+              if [ $? -ne 0 ]; then
+                echo "Error: Environment $DEPLOY_ENV not found"
+                echo "Environment check output: $ENV_CHECK"
+                exit 1
+              fi
+              
+              echo "Environment $DEPLOY_ENV exists, proceeding with deployment..."
+              
+              # Deploy the proxy with full error output
+              DEPLOY_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis deploy \
+                -n "$PROXY_NAME" \
+                -o "$APIGEE_ORG" \
+                -e "$DEPLOY_ENV" \
+                -r "$REVISION" \
+                -t "$ACCESS_TOKEN" \
+                --ovr \
+                --wait 2>&1)
+              
+              DEPLOY_STATUS=$?
+              
+              echo "Deployment output: $DEPLOY_OUTPUT"
+              
+              if [ $DEPLOY_STATUS -ne 0 ]; then
+                echo "Failed to deploy to $DEPLOY_ENV"
+                echo "Deploy command exit code: $DEPLOY_STATUS"
+                DEPLOY_SUCCESS=false
+                exit 1
+              fi
+              
+              echo "Successfully deployed to $DEPLOY_ENV"
+            done
+            
+            if [ "$DEPLOY_SUCCESS" = true ]; then
+              echo "success=true" >> $GITHUB_OUTPUT
+            else
+              echo "success=false" >> $GITHUB_OUTPUT
+              exit 1
             fi
-
-            echo "Successfully deployed to $DEPLOY_ENV"
-          done
-
-          if [ "$DEPLOY_SUCCESS" = true ]; then
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
 
   Request_Production_Approval:
     needs: [Deploy_Proxy_To_Environment]
