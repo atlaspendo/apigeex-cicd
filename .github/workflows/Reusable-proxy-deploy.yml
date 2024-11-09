@@ -266,7 +266,7 @@ jobs:
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
- Deploy_Proxy_To_Environment:
+Deploy_Proxy_To_Environment:
     needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
     if: needs.Setup_GCP_Authentication.result == 'success' && needs.Build_And_Upload_Proxy.result == 'success'
     runs-on: ubuntu-latest
