@@ -375,8 +375,7 @@ jobs:
           echo "Waiting 10 seconds after verification..."
           sleep 5
           
-  # After successful non-prod deployment
-  Request_Production_Approval:
+ Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
     if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
     runs-on: ubuntu-latest
@@ -406,14 +405,14 @@ jobs:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
           token_format: 'access_token'
+        env:
+          GOOGLE_GHA_CREDS_PATH: ${RUNNER_TEMP}/gha-creds.json
 
   Deploy_To_Production:
     needs: [Setup_Prod_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ steps.deployment.outputs.deployment_url }}
+    # Removed the environment here since we already got approval
     steps:
       - name: Install apigeecli
         run: |
@@ -421,12 +420,20 @@ jobs:
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
+      - name: Get Production Auth Token
+        id: auth
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: 'access_token'
+
       - name: Deploy to Production
         id: deployment
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.Setup_Prod_Auth.outputs.access_token }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           REVISION: ${{ needs.Request_Production_Approval.outputs.revision }}
         run: |
           echo "Deploying to production environment"
