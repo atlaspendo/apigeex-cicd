@@ -266,15 +266,15 @@ jobs:
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-  Deploy_Proxy_To_Environment:
-    needs: [Setup_GCP_Authentication, Build_And_Upload_Proxy]
-    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
+  Deploy_to_Environment:
+    needs: [validate_deployment_inputs, Setup_GCP_Authentication, Build_And_Upload_Proxy]
     strategy:
       matrix:
-       environment: ${{ fromJson(inputs.environment_type) }}
+        environment: ${{ fromJSON(needs.validate_deployment_inputs.outputs.environments) }}
       fail-fast: false
       max-parallel: 1
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ matrix.environment }}
     steps:
     - name: Authenticate to Google Cloud
       id: auth
