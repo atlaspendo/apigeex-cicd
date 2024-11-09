@@ -313,6 +313,17 @@ jobs:
             echo "Revision: $REVISION"
             echo "Organization: $APIGEE_ORG"
             
+            # First verify the proxy exists
+            $HOME/.apigeecli/bin/apigeecli apis get \
+              -n "$PROXY_NAME" \
+              -o "$APIGEE_ORG" \
+              -t "$ACCESS_TOKEN"
+            
+            if [ $? -ne 0 ]; then
+              echo "Error: Could not find proxy $PROXY_NAME"
+              exit 1
+            fi
+            
             # Split environment types
             IFS=',' read -ra ENV_TYPES <<< "$ENV_TYPE"
             DEPLOY_SUCCESS=true
@@ -329,29 +340,73 @@ jobs:
               echo "---"
               echo "Deploying to environment: $DEPLOY_ENV"
               
+              # Verify environment exists
+              $HOME/.apigeecli/bin/apigeecli environments get \
+                -o "$APIGEE_ORG" \
+                -e "$DEPLOY_ENV" \
+                -t "$ACCESS_TOKEN"
+              
+              if [ $? -ne 0 ]; then
+                echo "Error: Environment $DEPLOY_ENV not found"
+                DEPLOY_SUCCESS=false
+                continue
+              fi
+              
+              # Check current deployment
+              CURRENT_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+                -o "$APIGEE_ORG" \
+                -t "$ACCESS_TOKEN" \
+                -n "$PROXY_NAME" \
+                -e "$DEPLOY_ENV" || true)
+              
+              if [[ "$CURRENT_DEPLOYMENT" == *"$REVISION"* ]]; then
+                echo "Revision $REVISION is already deployed to $DEPLOY_ENV"
+                continue
+              fi
+              
               # Deploy the proxy
-              $HOME/.apigeecli/bin/apigeecli apis deploy \
+              DEPLOY_RESULT=$($HOME/.apigeecli/bin/apigeecli apis deploy \
                 -n "$PROXY_NAME" \
                 -o "$APIGEE_ORG" \
                 -e "$DEPLOY_ENV" \
                 -r "$REVISION" \
                 -t "$ACCESS_TOKEN" \
                 --ovr \
-                --wait
+                --wait 2>&1)
               
-              if [ $? -ne 0 ]; then
+              DEPLOY_STATUS=$?
+              echo "Deployment output: $DEPLOY_RESULT"
+              
+              if [ $DEPLOY_STATUS -ne 0 ]; then
                 echo "Failed to deploy to $DEPLOY_ENV"
+                echo "Deploy command exit code: $DEPLOY_STATUS"
                 DEPLOY_SUCCESS=false
                 break
               fi
               
               echo "Successfully deployed to $DEPLOY_ENV"
+              
+              # Verify deployment
+              sleep 5  # Wait a bit for deployment to stabilize
+              VERIFY_DEPLOYMENT=$($HOME/.apigeecli/bin/apigeecli apis list deployments \
+                -o "$APIGEE_ORG" \
+                -t "$ACCESS_TOKEN" \
+                -n "$PROXY_NAME" \
+                -e "$DEPLOY_ENV" || true)
+              
+              if [[ ! "$VERIFY_DEPLOYMENT" == *"$REVISION"* ]]; then
+                echo "Deployment verification failed for $DEPLOY_ENV"
+                DEPLOY_SUCCESS=false
+                break
+              fi
             done
             
             if [ "$DEPLOY_SUCCESS" = true ]; then
               echo "success=true" >> $GITHUB_OUTPUT
+              echo "All deployments completed successfully"
             else
               echo "success=false" >> $GITHUB_OUTPUT
+              echo "One or more deployments failed"
               exit 1
             fi
 
