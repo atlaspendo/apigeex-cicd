@@ -252,6 +252,71 @@ jobs:
             exit 1
           fi
           echo "::endgroup::"
+
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+          create_credentials_file: true
+
+      - name: Upload and Get Revision
+        id: upload
+        run: |
+          echo "::group::📤 Uploading to Non-Prod"
+          echo "Organization: ${{ secrets.APIGEE_ORG }}"
+          echo "Proxy name: ${{ inputs.proxy_name }}"
+          
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Add pre-upload wait
+          echo "Waiting for token validation..."
+          sleep 5
+          
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "${{ inputs.proxy_name }}" \
+            -p proxy.zip \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --token "$TOKEN")
+          
+          echo "Import output: $IMPORT_OUTPUT"
+          
+          # Add post-upload wait
+          echo "Waiting for import to process..."
+          sleep 5
+          
+          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          if [ -z "$NEW_REVISION" ]; then
+            echo "❌ Failed to get revision number"
+            exit 1
+          fi
+          
+          # Save revision number for future use
+          echo "$NEW_REVISION" > artifacts/revision.txt
+          echo "✅ Successfully uploaded revision: $NEW_REVISION"
+          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Verify Upload
+        if: success()
+        run: |
+          echo "::group::✔️ Verifying Upload"
+          echo "Revision file contents:"
+          cat artifacts/revision.txt
+          echo "Proxy bundle exists: $(test -f proxy.zip && echo 'Yes' || echo 'No')"
+          echo "✅ Upload verification complete"
+          echo "::endgroup::"
+
+      - name: Save Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: proxy-artifacts
+          path: |
+            artifacts/proxy.zip
+            artifacts/revision.txt
+          retention-days: 1
           
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -289,21 +354,33 @@ jobs:
             DEPLOY_ENV="${{ inputs.environment_group }}-${{ needs.validate_deployment_inputs.outputs.environment }}"
           fi
           
+          REVISION="${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+          
+          if [ -z "$REVISION" ]; then
+            echo "❌ Error: No revision number found"
+            exit 1
+          fi
+          
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+          echo "📦 Revision: $REVISION"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
             --org "${{ secrets.APIGEE_ORG }}" \
             --env "$DEPLOY_ENV" \
-            --rev "${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}" \
+            --rev "$REVISION" \
             --token "$TOKEN" \
             --ovr \
             --wait
           
-          echo "✅ Successfully deployed to $DEPLOY_ENV"
+          if [ $? -eq 0 ]; then
+            echo "✅ Successfully deployed to $DEPLOY_ENV"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
           echo "::endgroup::"
-
+          
   Verify_NonProd_Deployment:
     needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
     if: needs.Deploy_To_NonProd.result == 'success'
