@@ -131,6 +131,10 @@ jobs:
       nonprod_token: ${{ steps.nonprod_auth.outputs.access_token }}
       prod_token: ${{ steps.prod_auth.outputs.access_token }}
     steps:
+      - name: Set up job
+        run: |
+          echo "Setting up authentication for both environments"
+
       - name: Non-Prod Authentication
         id: nonprod_auth
         uses: 'google-github-actions/auth@v1'
@@ -140,15 +144,23 @@ jobs:
           token_format: 'access_token'
           create_credentials_file: true
 
+      - name: Post Non-Prod Authentication
+        run: |
+          echo "Non-prod authentication completed"
+
       - name: Prod Authentication
         id: prod_auth
-        if: inputs.environment_type == 'prod'
+        # Remove the condition here to always run prod auth
         uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
           token_format: 'access_token'
           create_credentials_file: true
+
+      - name: Complete job
+        run: |
+          echo "Authentication setup completed for both environments"
 
   Validate_API_Proxy:
     needs: [validate_deployment_inputs, Setup_Auth]
