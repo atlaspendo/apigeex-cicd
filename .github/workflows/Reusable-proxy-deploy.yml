@@ -209,6 +209,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            echo "::group::🔧 Installing Apigee CLI"
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
+
       - name: Create API bundle
         id: create-bundle
         run: |
