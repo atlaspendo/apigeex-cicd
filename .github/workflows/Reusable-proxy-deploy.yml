@@ -439,6 +439,8 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
+      
+
       - name: Use Non-Prod Revision
         id: use-revision
         run: |
@@ -498,6 +500,10 @@ jobs:
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
+      - name: Verify Revision
+        run: |
+          echo "Revision: ${{ steps.upload.outputs.revision }}"
+
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod]
     if: needs.Build_And_Upload_Prod.result == 'success'
@@ -526,6 +532,19 @@ jobs:
           token_format: 'access_token'
           create_credentials_file: true
 
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: proxy-artifacts
+          path: artifacts
+
+      - name: Get Revision from Artifact
+        id: get-revision
+        run: |
+          REVISION=$(cat artifacts/revision.txt)
+          echo "Revision: $REVISION"
+          echo "revision=$REVISION" >> $GITHUB_OUTPUT
+
       - name: Deploy to Production
         run: |
           echo "::group::🚀 Deploying to Production"
@@ -540,13 +559,13 @@ jobs:
           fi
           
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.revision }}"
+          echo "📦 Revision: ${{ steps.get-revision.outputs.revision }}"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --env "$DEPLOY_ENV" \
-            --rev "${{ needs.Build_And_Upload_Prod.outputs.revision }}" \
+            --rev "${{ steps.get-revision.outputs.revision }}" \
             --token "$TOKEN" \
             --ovr \
             --wait
@@ -559,7 +578,7 @@ jobs:
           echo "::group::📋 Deployment Summary"
           echo "✅ Production deployment completed successfully"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.revision }}"
+          echo "📝 Revision: ${{ steps.get-revision.outputs.revision }}"
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
