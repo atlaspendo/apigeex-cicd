@@ -138,6 +138,7 @@ jobs:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
+          create_credentials_file: true
 
       - name: Prod Authentication
         id: prod_auth
@@ -147,6 +148,7 @@ jobs:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
           token_format: 'access_token'
+          create_credentials_file: true
 
   Validate_API_Proxy:
     needs: [validate_deployment_inputs, Setup_Auth]
@@ -177,7 +179,7 @@ jobs:
             exit 1
           fi
 
-  Build_And_Upload_NonProd:
+ Build_And_Upload_NonProd:
     needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
@@ -228,6 +230,15 @@ jobs:
             exit 1
           fi
 
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+          create_credentials_file: true
+
       - name: Upload and Get Revision
         id: upload
         run: |
@@ -237,11 +248,13 @@ jobs:
           echo "Waiting 10 seconds before upload..."
           sleep 10
           
+          TOKEN=$(gcloud auth print-access-token)
+          
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
             -p proxy.zip \
             --org "${{ secrets.APIGEE_ORG }}" \
-            --token "${{ needs.Setup_Auth.outputs.nonprod_token }}")
+            --token "$TOKEN")
           
           echo "Import output: $IMPORT_OUTPUT"
           
@@ -250,8 +263,8 @@ jobs:
             exit 1
           fi
           
-          echo "Waiting 30 seconds for upload to process..."
-          sleep 30
+          echo "Waiting 15 seconds for upload to process..."
+          sleep 15
           
           LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           
@@ -261,19 +274,11 @@ jobs:
           fi
           
           # Save revision number for prod deployment
+          mkdir -p $GITHUB_WORKSPACE/artifacts
           echo "$LATEST_REVISION" > $GITHUB_WORKSPACE/artifacts/revision.txt
           
           echo "Latest revision: $LATEST_REVISION"
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: proxy-artifacts
-          path: |
-            ${{ github.workspace }}/artifacts/proxy.zip
-            ${{ github.workspace }}/artifacts/revision.txt
-          retention-days: 1
 
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -407,11 +412,14 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
-      - name: Install apigeecli
-        run: |
-          mkdir -p $HOME/.apigeecli/bin
-          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: 'access_token'
+          create_credentials_file: true
 
       - name: Upload to Production
         id: upload
@@ -419,22 +427,20 @@ jobs:
           TARGET_REVISION=$(cat artifacts/revision.txt)
           echo "Using target revision: $TARGET_REVISION"
           
+          TOKEN=$(gcloud auth print-access-token)
+          
           echo "Importing bundle to production org..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
             -p artifacts/proxy.zip \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
-            --token "${{ needs.Setup_Auth.outputs.prod_token }}")
+            --token "$TOKEN")
           
           NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
 
-      - name: Verify Upload
-        if: success()
-        run: |
           echo "Waiting 15 seconds to verify upload..."
           sleep 15
-          echo "Upload verification complete"
 
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod, Request_Production_Approval]
