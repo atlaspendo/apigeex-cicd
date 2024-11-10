@@ -439,8 +439,6 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
-      
-
       - name: Use Non-Prod Revision
         id: use-revision
         run: |
@@ -474,13 +472,10 @@ jobs:
       - name: Upload to Production
         id: upload
         run: |
-          echo "::group::📤 Uploading to Production"
-          TARGET_REVISION=${{ steps.use-revision.outputs.revision }}
-          echo "📝 Target revision: $TARGET_REVISION"
+          # ... (existing code)
+          REVISION=${{ needs.Request_Production_Approval.outputs.revision }}
+          echo "📝 Target revision: $REVISION"
           
-          TOKEN=$(gcloud auth print-access-token)
-          
-          echo "Importing bundle to production org..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
             -p artifacts/proxy.zip \
@@ -565,7 +560,7 @@ jobs:
             --name "${{ inputs.proxy_name }}" \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --env "$DEPLOY_ENV" \
-            --rev "${{ steps.get-revision.outputs.revision }}" \
+            --rev "${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}" \
             --token "$TOKEN" \
             --ovr \
             --wait
