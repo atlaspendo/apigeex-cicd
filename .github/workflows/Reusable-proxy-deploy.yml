@@ -230,49 +230,41 @@ jobs:
 
       - name: Upload and Get Revision
         id: upload
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.nonprod_token }}
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            echo "Using organization: $APIGEE_ORG"
-            echo "Using proxy name: $PROXY_NAME"
-            
-            echo "Waiting 10 seconds before upload..."
-            sleep 10
-            
-            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-              -n "$PROXY_NAME" \
-              -p proxy.zip \
-              --org "$APIGEE_ORG" \
-              --token "$ACCESS_TOKEN")
-            
-            echo "Import output: $IMPORT_OUTPUT"
-            
-            if [ $? -ne 0 ]; then
-              echo "Failed to import API proxy bundle"
-              exit 1
-            fi
-            
-            echo "Waiting 30 seconds for upload to process..."
-            sleep 30
-            
-            LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-            
-            if [ -z "$LATEST_REVISION" ]; then
-              echo "Failed to get revision number"
-              exit 1
-            fi
-            
-            # Save revision number for prod deployment
-            echo "$LATEST_REVISION" > $GITHUB_WORKSPACE/artifacts/revision.txt
-            
-            echo "Latest revision: $LATEST_REVISION"
-            echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+        run: |
+          echo "Using organization: ${{ secrets.APIGEE_ORG }}"
+          echo "Using proxy name: ${{ inputs.proxy_name }}"
+          
+          echo "Waiting 10 seconds before upload..."
+          sleep 10
+          
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "${{ inputs.proxy_name }}" \
+            -p proxy.zip \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --token "${{ needs.Setup_Auth.outputs.nonprod_token }}")
+          
+          echo "Import output: $IMPORT_OUTPUT"
+          
+          if [ $? -ne 0 ]; then
+            echo "Failed to import API proxy bundle"
+            exit 1
+          fi
+          
+          echo "Waiting 30 seconds for upload to process..."
+          sleep 30
+          
+          LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          
+          if [ -z "$LATEST_REVISION" ]; then
+            echo "Failed to get revision number"
+            exit 1
+          fi
+          
+          # Save revision number for prod deployment
+          echo "$LATEST_REVISION" > $GITHUB_WORKSPACE/artifacts/revision.txt
+          
+          echo "Latest revision: $LATEST_REVISION"
+          echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
@@ -423,23 +415,26 @@ jobs:
 
       - name: Upload to Production
         id: upload
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.prod_token }}
         run: |
           TARGET_REVISION=$(cat artifacts/revision.txt)
           echo "Using target revision: $TARGET_REVISION"
           
           echo "Importing bundle to production org..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "$PROXY_NAME" \
+            -n "${{ inputs.proxy_name }}" \
             -p artifacts/proxy.zip \
-            --org "$APIGEE_ORG" \
-            --token "$ACCESS_TOKEN")
+            --org "${{ secrets.APIGEE_ORG_PROD }}" \
+            --token "${{ needs.Setup_Auth.outputs.prod_token }}")
           
           NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+
+      - name: Verify Upload
+        if: success()
+        run: |
+          echo "Waiting 15 seconds to verify upload..."
+          sleep 15
+          echo "Upload verification complete"
 
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod, Request_Production_Approval]
