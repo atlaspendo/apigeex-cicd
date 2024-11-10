@@ -200,11 +200,15 @@ jobs:
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
+      Build_And_Upload_NonProd:
+    # ... [Previous configurations remain same]
+    steps:
+      # ... [Previous steps remain same until Create API bundle]
+
       - name: Create API bundle
         id: create-bundle
         run: |
-          # Create artifacts directory
-          mkdir -p $GITHUB_WORKSPACE/artifacts
+          mkdir -p artifacts
           
           create_bundle() {
             local source_dir="$1"
@@ -215,7 +219,7 @@ jobs:
             zip -r ../proxy.zip apiproxy
             cd ..
             # Save bundle for prod deployment
-            cp proxy.zip $GITHUB_WORKSPACE/artifacts/proxy.zip
+            cp proxy.zip artifacts/
             echo "Zip contents:"
             unzip -l proxy.zip
             rm -rf temp_bundle
@@ -245,9 +249,6 @@ jobs:
           echo "Using organization: ${{ secrets.APIGEE_ORG }}"
           echo "Using proxy name: ${{ inputs.proxy_name }}"
           
-          echo "Waiting 10 seconds before upload..."
-          sleep 10
-          
           TOKEN=$(gcloud auth print-access-token)
           
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
@@ -258,27 +259,20 @@ jobs:
           
           echo "Import output: $IMPORT_OUTPUT"
           
-          if [ $? -ne 0 ]; then
-            echo "Failed to import API proxy bundle"
-            exit 1
-          fi
-          
-          echo "Waiting 15 seconds for upload to process..."
-          sleep 15
-          
           LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          
-          if [ -z "$LATEST_REVISION" ]; then
-            echo "Failed to get revision number"
-            exit 1
-          fi
-          
-          # Save revision number for prod deployment
-          mkdir -p $GITHUB_WORKSPACE/artifacts
-          echo "$LATEST_REVISION" > $GITHUB_WORKSPACE/artifacts/revision.txt
+          echo "$LATEST_REVISION" > artifacts/revision.txt
           
           echo "Latest revision: $LATEST_REVISION"
           echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+
+      - name: Save Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: proxy-artifacts
+          path: |
+            artifacts/proxy.zip
+            artifacts/revision.txt
+          retention-days: 1
 
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -412,6 +406,12 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
+      - name: List Downloaded Artifacts
+        run: |
+          ls -la artifacts/
+          echo "Content of revision.txt:"
+          cat artifacts/revision.txt
+
       - name: Get GCP Token
         id: get-token
         uses: 'google-github-actions/auth@v1'
@@ -438,9 +438,6 @@ jobs:
           
           NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
-
-          echo "Waiting 15 seconds to verify upload..."
-          sleep 15
 
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod, Request_Production_Approval]
