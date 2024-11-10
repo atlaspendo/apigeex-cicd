@@ -472,7 +472,7 @@ jobs:
       - name: Upload to Production
         id: upload
         run: |
-          # ... (existing code)
+          echo "::group::📤 Uploading to Production"
           REVISION=${{ needs.Request_Production_Approval.outputs.revision }}
           echo "📝 Target revision: $REVISION"
           
