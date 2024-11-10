@@ -391,6 +391,7 @@ jobs:
           echo "Proxy Name: ${{ inputs.proxy_name }}"
           echo "Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
 
+
   Setup_Prod_Auth:
     needs: [Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
@@ -405,14 +406,67 @@ jobs:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
           token_format: 'access_token'
-        env:
-          GOOGLE_GHA_CREDS_PATH: ${RUNNER_TEMP}/gha-creds.json
 
-  Deploy_To_Production:
+  Import_To_Production:
     needs: [Setup_Prod_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
-    # Removed the environment here since we already got approval
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install apigeecli
+        run: |
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
+      - name: Create API bundle
+        id: create-bundle
+        run: |
+          create_bundle() {
+            local source_dir="$1"
+            echo "Creating bundle from: $source_dir"
+            mkdir -p temp_bundle
+            cp -r "$source_dir" temp_bundle/apiproxy
+            cd temp_bundle
+            zip -r ../proxy.zip apiproxy
+            cd ..
+            echo "Zip contents:"
+            unzip -l proxy.zip
+            rm -rf temp_bundle
+          }
+          
+          if [ -d "${{ inputs.proxy_directory }}" ]; then
+            create_bundle "${{ inputs.proxy_directory }}"
+          elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
+            create_bundle "src/${{ inputs.proxy_directory }}"
+          else
+            echo "Error: Could not find apiproxy directory"
+            exit 1
+          fi
+
+      - name: Import to Production
+        id: import
+        env:
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ needs.Setup_Prod_Auth.outputs.access_token }}
+          TARGET_REVISION: ${{ needs.Request_Production_Approval.outputs.revision }}
+        run: |
+          echo "Importing bundle to production org..."
+          
+          $HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "$PROXY_NAME" \
+            -p proxy.zip \
+            --org "$APIGEE_ORG" \
+            --token "$ACCESS_TOKEN" \
+            --rev "$TARGET_REVISION"
+
+  Deploy_To_Production:
+    needs: [Import_To_Production, Setup_Prod_Auth, Request_Production_Approval]
+    if: always() && needs.Request_Production_Approval.result == 'success'
+    runs-on: ubuntu-latest
     steps:
       - name: Install apigeecli
         run: |
@@ -420,20 +474,12 @@ jobs:
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      - name: Get Production Auth Token
-        id: auth
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: 'access_token'
-
       - name: Deploy to Production
         id: deployment
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          ACCESS_TOKEN: ${{ needs.Setup_Prod_Auth.outputs.access_token }}
           REVISION: ${{ needs.Request_Production_Approval.outputs.revision }}
         run: |
           echo "Deploying to production environment"
@@ -446,5 +492,3 @@ jobs:
             --token "$ACCESS_TOKEN" \
             --ovr \
             --wait
-
-          echo "deployment_url=https://$APIGEE_ORG-prod.apigee.net/$PROXY_NAME" >> $GITHUB_OUTPUT
