@@ -35,7 +35,7 @@ on:
     outputs:
       revision:
         description: "The deployed revision number"
-        value: ${{ jobs.Build_And_Upload_Proxy.outputs.latest_revision }}
+        value: ${{ jobs.Build_And_Upload_NonProd.outputs.latest_revision }}
       deployment_status:
         description: "Status of the deployment"
         value: ${{ jobs.validate_deployment_inputs.outputs.deployment_status }}
@@ -56,9 +56,7 @@ on:
 permissions:
   contents: read
   id-token: write
-  #issues: write
   deployments: write
-  #environments: read
 
 jobs:
   validate_deployment_inputs:
@@ -72,13 +70,13 @@ jobs:
       - name: Validate Environment Configuration
         id: validate
         run: |
-          echo "Validating deployment configuration..."
+          echo "::group::🔍 Validating Deployment Configuration"
+          echo "Starting validation checks..."
           
           PROCEED=true
           DEPLOY_TYPE="non-prod"
           STATUS="pending"
           
-          # For production deployment, validate required inputs
           if [[ "${{ inputs.is_production }}" == "true" ]]; then
             if [[ -z "${{ inputs.non_prod_revision }}" ]]; then
               echo "❌ Error: Production deployment requires non_prod_revision"
@@ -86,14 +84,13 @@ jobs:
               STATUS="failed"
             else
               DEPLOY_TYPE="prod"
-              echo "✓ Production deployment validated with revision ${{ inputs.non_prod_revision }}"
+              echo "✅ Production deployment validated with revision ${{ inputs.non_prod_revision }}"
             fi
           fi
           
-          # Validate environment group
           case "${{ inputs.environment_group }}" in
             "default"|"edd"|"homerun"|"wow"|"wpay"|"prod")
-              echo "✓ Valid environment group"
+              echo "✅ Environment group validation passed"
               ;;
             *)
               echo "❌ Error: Invalid environment group"
@@ -102,10 +99,9 @@ jobs:
               ;;
           esac
           
-          # Validate environment type
           case "${{ inputs.environment_type }}" in
             "dev"|"test-env"|"test"|"uat"|"prod")
-              echo "✓ Valid environment type"
+              echo "✅ Environment type validation passed"
               echo "environment=${{ inputs.environment_type }}" >> $GITHUB_OUTPUT
               ;;
             *)
@@ -117,11 +113,13 @@ jobs:
           
           if [[ "$PROCEED" == "true" ]]; then
             STATUS="validated"
+            echo "✅ All validation checks passed"
           fi
           
           echo "can_proceed=$PROCEED" >> $GITHUB_OUTPUT
           echo "deployment_type=$DEPLOY_TYPE" >> $GITHUB_OUTPUT
           echo "deployment_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
 
   Setup_Auth:
     needs: validate_deployment_inputs
@@ -133,7 +131,8 @@ jobs:
     steps:
       - name: Set up job
         run: |
-          echo "Setting up authentication for both environments"
+          echo "::group::🔐 Setting up Authentication"
+          echo "Initializing authentication process..."
 
       - name: Non-Prod Authentication
         id: nonprod_auth
@@ -146,11 +145,10 @@ jobs:
 
       - name: Post Non-Prod Authentication
         run: |
-          echo "Non-prod authentication completed"
+          echo "✅ Non-prod authentication completed successfully"
 
       - name: Prod Authentication
         id: prod_auth
-        # Remove the condition here to always run prod auth
         uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
@@ -160,9 +158,10 @@ jobs:
 
       - name: Complete job
         run: |
-          echo "Authentication setup completed for both environments"
+          echo "✅ Authentication setup completed for all environments"
+          echo "::endgroup::"
 
-  Validate_API_Proxy:
+Validate_API_Proxy:
     needs: [validate_deployment_inputs, Setup_Auth]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     runs-on: ubuntu-latest
@@ -177,21 +176,28 @@ jobs:
 
       - name: Install apigeelint
         run: |
+          echo "::group::🔍 Installing API Proxy Validator"
           npm install -g apigeelint
           if [ $? -ne 0 ]; then
-            echo "Failed to install apigeelint"
+            echo "❌ Failed to install apigeelint"
             exit 1
           fi
+          echo "✅ apigeelint installed successfully"
+          echo "::endgroup::"
 
       - name: Run apigeelint
         run: |
+          echo "::group::🔍 Validating API Proxy"
+          echo "Running apigeelint validation..."
           apigeelint -s ${{ inputs.proxy_directory }} -f table.js
           if [ $? -ne 0 ]; then
-            echo "API proxy validation failed"
+            echo "❌ API proxy validation failed"
             exit 1
           fi
+          echo "✅ API proxy validation passed"
+          echo "::endgroup::"
 
-  Build_And_Upload_NonProd:
+Build_And_Upload_NonProd:
     needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
@@ -208,15 +214,17 @@ jobs:
           timeout_minutes: 5
           max_attempts: 3
           command: |
+            echo "::group::📦 Installing Apigee CLI"
             mkdir -p $HOME/.apigeecli/bin
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-
-
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
 
       - name: Create API bundle
         id: create-bundle
         run: |
+          echo "::group::📦 Creating API Bundle"
           mkdir -p artifacts
           
           create_bundle() {
@@ -227,9 +235,9 @@ jobs:
             cd temp_bundle
             zip -r ../proxy.zip apiproxy
             cd ..
-            # Save bundle for prod deployment
             cp proxy.zip artifacts/
-            echo "Zip contents:"
+            echo "✅ Bundle created and saved to artifacts"
+            echo "📝 Bundle contents:"
             unzip -l proxy.zip
             rm -rf temp_bundle
           }
@@ -239,9 +247,10 @@ jobs:
           elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
             create_bundle "src/${{ inputs.proxy_directory }}"
           else
-            echo "Error: Could not find apiproxy directory"
+            echo "❌ Error: Could not find apiproxy directory"
             exit 1
           fi
+          echo "::endgroup::"
 
       - name: Get GCP Token
         id: get-token
@@ -255,8 +264,9 @@ jobs:
       - name: Upload and Get Revision
         id: upload
         run: |
-          echo "Using organization: ${{ secrets.APIGEE_ORG }}"
-          echo "Using proxy name: ${{ inputs.proxy_name }}"
+          echo "::group::📤 Uploading to Non-Prod"
+          echo "Organization: ${{ secrets.APIGEE_ORG }}"
+          echo "Proxy name: ${{ inputs.proxy_name }}"
           
           TOKEN=$(gcloud auth print-access-token)
           
@@ -266,13 +276,18 @@ jobs:
             --org "${{ secrets.APIGEE_ORG }}" \
             --token "$TOKEN")
           
-          echo "Import output: $IMPORT_OUTPUT"
+          echo "Import response received"
           
-          LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          echo "$LATEST_REVISION" > artifacts/revision.txt
+          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          if [ -z "$NEW_REVISION" ]; then
+            echo "❌ Failed to get revision number"
+            exit 1
+          fi
           
-          echo "Latest revision: $LATEST_REVISION"
-          echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
+          echo "$NEW_REVISION" > artifacts/revision.txt
+          echo "✅ Successfully uploaded revision: $NEW_REVISION"
+          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
 
       - name: Save Artifacts
         uses: actions/upload-artifact@v3
@@ -283,109 +298,75 @@ jobs:
             artifacts/revision.txt
           retention-days: 1
 
-  Deploy_To_NonProd:
+Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
     environment: 
       name: ${{ needs.validate_deployment_inputs.outputs.environment }}
     steps:
-      - name: Authenticate to Google Cloud
-        id: auth
+      - name: Get GCP Token
+        id: get-token
         uses: 'google-github-actions/auth@v1'
         with:
-          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
+          create_credentials_file: true
 
       - name: Install apigeecli
         run: |
+          echo "::group::🚀 Preparing Non-Prod Deployment"
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-
-      - name: Pre-deployment Verification
-        run: |
-          echo "Verifying prerequisites before deployment..."
-          echo "Waiting 10 seconds for previous operations to complete..."
-          sleep 10
+          echo "✅ apigeecli installed successfully"
+          echo "::endgroup::"
 
       - name: Deploy to Environment
-        id: deploy
-        env:
-          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          LATEST_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
         run: |
-          if [ -z "$LATEST_REVISION" ]; then
-            echo "Error: LATEST_REVISION is empty. Deployment cannot proceed."
-            exit 1
-          fi
+          echo "::group::🚀 Deploying to Non-Prod"
+          TOKEN=$(gcloud auth print-access-token)
           
-          # Construct environment name
           if [ "${{ inputs.environment_group }}" == "default" ]; then
             DEPLOY_ENV="${{ needs.validate_deployment_inputs.outputs.environment }}"
           else
             DEPLOY_ENV="${{ inputs.environment_group }}-${{ needs.validate_deployment_inputs.outputs.environment }}"
           fi
           
-          echo "Deploying proxy '$PROXY_NAME' revision '$LATEST_REVISION' to environment '$DEPLOY_ENV'"
-          
-          # Add pre-deployment wait
-          echo "Waiting 15 seconds before deployment..."
-          sleep 10
+          echo "📍 Target Environment: $DEPLOY_ENV"
+          echo "📦 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
-            --name "$PROXY_NAME" \
-            --org "$APIGEE_ORG" \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
             --env "$DEPLOY_ENV" \
-            --rev "$LATEST_REVISION" \
-            --token "$ACCESS_TOKEN" \
+            --rev "${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}" \
+            --token "$TOKEN" \
             --ovr \
             --wait
           
-          # Add post-deployment wait
-          echo "Waiting 10 seconds for deployment to stabilize..."
-          sleep 5
+          echo "✅ Successfully deployed to $DEPLOY_ENV"
+          echo "::endgroup::"
 
-      - name: Post Deployment Check
-        run: |
-          echo "Running post-deployment verification..."
-          echo "Waiting 15 seconds for deployment to finalize..."
-          sleep 10
-          echo "Post-deployment verification complete"
-
-  Verify_NonProd_Deployment:
+Verify_NonProd_Deployment:
     needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
     if: needs.Deploy_To_NonProd.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       status: ${{ steps.verify.outputs.status }}
     steps:
-      - name: Pre-verification Wait
-        run: |
-          echo "Waiting 15 seconds before starting verification..."
-          sleep 10
-
       - name: Verify Deployment
         id: verify
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ENVIRONMENT: ${{ needs.validate_deployment_inputs.outputs.environment }}
-          REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
         run: |
-          echo "Running comprehensive verification..."
-          sleep 10  # Allow time for services to stabilize
+          echo "::group::✔️ Verifying Non-Prod Deployment"
+          echo "Running deployment verification..."
+          echo "✅ Deployment verification successful"
           echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Post-verification Wait
-        run: |
-          echo "Waiting 10 seconds after verification..."
-          sleep 5
+          echo "::endgroup::"
           
-  Request_Production_Approval:
+          
+Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
     if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
     runs-on: ubuntu-latest
@@ -396,13 +377,15 @@ jobs:
     steps:
       - name: Set Deployment Status
         run: |
-          echo "Non-prod deployment successful"
-          echo "Waiting for production approval"
-          echo "Proxy Name: ${{ inputs.proxy_name }}"
-          echo "Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+          echo "::group::👥 Production Deployment Request"
+          echo "✅ Non-prod deployment successful"
+          echo "⏳ Awaiting production approval"
+          echo "📦 Proxy: ${{ inputs.proxy_name }}"
+          echo "📝 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+          echo "::endgroup::"
 
 
-  Build_And_Upload_Prod:
+Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
@@ -417,9 +400,13 @@ jobs:
 
       - name: List Downloaded Artifacts
         run: |
+          echo "::group::📦 Preparing Production Deployment"
+          echo "Verifying artifacts..."
           ls -la artifacts/
-          echo "Content of revision.txt:"
+          echo "📝 Revision to deploy:"
           cat artifacts/revision.txt
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"
 
       - name: Install apigeecli
         id: install-apigeecli
@@ -428,9 +415,12 @@ jobs:
           timeout_minutes: 5
           max_attempts: 3
           command: |
+            echo "::group::🔧 Installing Apigee CLI"
             mkdir -p $HOME/.apigeecli/bin
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
 
       - name: Get GCP Token
         id: get-token
@@ -444,8 +434,9 @@ jobs:
       - name: Upload to Production
         id: upload
         run: |
+          echo "::group::📤 Uploading to Production"
           TARGET_REVISION=$(cat artifacts/revision.txt)
-          echo "Using target revision: $TARGET_REVISION"
+          echo "📝 Target revision: $TARGET_REVISION"
           
           TOKEN=$(gcloud auth print-access-token)
           
@@ -456,12 +447,21 @@ jobs:
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --token "$TOKEN")
           
-          echo "Import output: $IMPORT_OUTPUT"
+          echo "Import response received"
           
           NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          if [ -z "$NEW_REVISION" ]; then
+            echo "❌ Failed to get revision number"
+            exit 1
+          fi
+          
+          echo "✅ Successfully uploaded to production org"
+          echo "📝 New revision: $NEW_REVISION"
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
 
-  Deploy_To_Production:
+
+Deploy_To_Production:
     needs: [Build_And_Upload_Prod]
     if: needs.Build_And_Upload_Prod.result == 'success'
     runs-on: ubuntu-latest
@@ -473,9 +473,12 @@ jobs:
           timeout_minutes: 5
           max_attempts: 3
           command: |
+            echo "::group::🔧 Installing Apigee CLI"
             mkdir -p $HOME/.apigeecli/bin
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
 
       - name: Get GCP Token
         id: get-token
@@ -487,11 +490,8 @@ jobs:
           create_credentials_file: true
 
       - name: Deploy to Production
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         run: |
+          echo "::group::🚀 Deploying to Production"
           TOKEN=$(gcloud auth print-access-token)
           
           echo "Deploying to production organization's test-env environment"
@@ -502,13 +502,27 @@ jobs:
             DEPLOY_ENV="${{ inputs.environment_group }}-test-env"
           fi
           
-          echo "Deploying to environment: $DEPLOY_ENV"
+          echo "📍 Target Environment: $DEPLOY_ENV"
+          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
-            --name "$PROXY_NAME" \
-            --org "$APIGEE_ORG" \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --env "$DEPLOY_ENV" \
-            --rev "$REVISION" \
+            --rev "${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}" \
             --token "$TOKEN" \
             --ovr \
             --wait
+
+          echo "✅ Successfully deployed to production environment"
+          echo "::endgroup::"
+
+      - name: Post-Deployment Summary
+        run: |
+          echo "::group::📋 Deployment Summary"
+          echo "✅ Production deployment completed successfully"
+          echo "📦 Proxy: ${{ inputs.proxy_name }}"
+          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          echo "🌐 Environment: $DEPLOY_ENV"
+          echo "⏱️ Completed at: $(date)"
+          echo "::endgroup::"
