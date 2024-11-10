@@ -120,7 +120,8 @@ jobs:
           echo "deployment_type=$DEPLOY_TYPE" >> $GITHUB_OUTPUT
           echo "deployment_status=$STATUS" >> $GITHUB_OUTPUT
           echo "::endgroup::"
-
+  
+  
   Setup_Auth:
     needs: validate_deployment_inputs
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
@@ -161,7 +162,7 @@ jobs:
           echo "✅ Authentication setup completed for all environments"
           echo "::endgroup::"
 
-Validate_API_Proxy:
+  Validate_API_Proxy:
     needs: [validate_deployment_inputs, Setup_Auth]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     runs-on: ubuntu-latest
@@ -197,7 +198,7 @@ Validate_API_Proxy:
           echo "✅ API proxy validation passed"
           echo "::endgroup::"
 
-Build_And_Upload_NonProd:
+  Build_And_Upload_NonProd:
     needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
@@ -251,54 +252,8 @@ Build_And_Upload_NonProd:
             exit 1
           fi
           echo "::endgroup::"
-
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT }}
-          token_format: 'access_token'
-          create_credentials_file: true
-
-      - name: Upload and Get Revision
-        id: upload
-        run: |
-          echo "::group::📤 Uploading to Non-Prod"
-          echo "Organization: ${{ secrets.APIGEE_ORG }}"
-          echo "Proxy name: ${{ inputs.proxy_name }}"
           
-          TOKEN=$(gcloud auth print-access-token)
-          
-          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "${{ inputs.proxy_name }}" \
-            -p proxy.zip \
-            --org "${{ secrets.APIGEE_ORG }}" \
-            --token "$TOKEN")
-          
-          echo "Import response received"
-          
-          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          if [ -z "$NEW_REVISION" ]; then
-            echo "❌ Failed to get revision number"
-            exit 1
-          fi
-          
-          echo "$NEW_REVISION" > artifacts/revision.txt
-          echo "✅ Successfully uploaded revision: $NEW_REVISION"
-          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
-          echo "::endgroup::"
-
-      - name: Save Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: proxy-artifacts
-          path: |
-            artifacts/proxy.zip
-            artifacts/revision.txt
-          retention-days: 1
-
-Deploy_To_NonProd:
+  Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
@@ -349,7 +304,7 @@ Deploy_To_NonProd:
           echo "✅ Successfully deployed to $DEPLOY_ENV"
           echo "::endgroup::"
 
-Verify_NonProd_Deployment:
+  Verify_NonProd_Deployment:
     needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
     if: needs.Deploy_To_NonProd.result == 'success'
     runs-on: ubuntu-latest
@@ -364,9 +319,8 @@ Verify_NonProd_Deployment:
           echo "✅ Deployment verification successful"
           echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
-          
-          
-Request_Production_Approval:
+
+  Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
     if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
     runs-on: ubuntu-latest
@@ -384,8 +338,7 @@ Request_Production_Approval:
           echo "📝 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
           echo "::endgroup::"
 
-
-Build_And_Upload_Prod:
+  Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
@@ -460,8 +413,7 @@ Build_And_Upload_Prod:
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
-
-Deploy_To_Production:
+  Deploy_To_Production:
     needs: [Build_And_Upload_Prod]
     if: needs.Build_And_Upload_Prod.result == 'success'
     runs-on: ubuntu-latest
@@ -526,3 +478,4 @@ Deploy_To_Production:
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
+
