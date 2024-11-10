@@ -204,23 +204,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
+      revision_file: ${{ steps.create-bundle.outputs.revision_file }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Install apigeecli
-        id: install-apigeecli
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: |
-            echo "::group::📦 Installing Apigee CLI"
-            mkdir -p $HOME/.apigeecli/bin
-            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
-            echo "✅ apigeecli installed successfully"
-            echo "::endgroup::"
 
       - name: Create API bundle
         id: create-bundle
@@ -241,6 +228,7 @@ jobs:
             echo "📝 Bundle contents:"
             unzip -l proxy.zip
             rm -rf temp_bundle
+            echo "revision_file=artifacts/revision.txt" >> $GITHUB_OUTPUT
           }
           
           if [ -d "${{ inputs.proxy_directory }}" ]; then
@@ -397,6 +385,12 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
+      - name: Save Revision
+        id: save-revision
+        run: |
+          echo "${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}" > artifacts/revision.txt
+
+
   Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
     if: needs.Verify_NonProd_Deployment.outputs.status == 'success'
@@ -428,15 +422,12 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
-      - name: List Downloaded Artifacts
+      - name: Use Non-Prod Revision
+        id: use-revision
         run: |
-          echo "::group::📦 Preparing Production Deployment"
-          echo "Verifying artifacts..."
-          ls -la artifacts/
-          echo "📝 Revision to deploy:"
-          cat artifacts/revision.txt
-          echo "✅ Artifacts verified successfully"
-          echo "::endgroup::"
+          REVISION=$(cat artifacts/revision.txt)
+          echo "Using revision: $REVISION"
+          echo "revision=$REVISION" >> $GITHUB_OUTPUT
 
       - name: Install apigeecli
         id: install-apigeecli
@@ -465,7 +456,7 @@ jobs:
         id: upload
         run: |
           echo "::group::📤 Uploading to Production"
-          TARGET_REVISION=$(cat artifacts/revision.txt)
+          TARGET_REVISION=${{ steps.use-revision.outputs.revision }}
           echo "📝 Target revision: $TARGET_REVISION"
           
           TOKEN=$(gcloud auth print-access-token)
@@ -532,13 +523,13 @@ jobs:
           fi
           
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.revision }}"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --env "$DEPLOY_ENV" \
-            --rev "${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}" \
+            --rev "${{ needs.Build_And_Upload_Prod.outputs.revision }}" \
             --token "$TOKEN" \
             --ovr \
             --wait
@@ -551,7 +542,7 @@ jobs:
           echo "::group::📋 Deployment Summary"
           echo "✅ Production deployment completed successfully"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.revision }}"
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
