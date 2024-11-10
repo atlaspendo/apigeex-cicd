@@ -383,7 +383,7 @@ jobs:
           fi
           echo "::endgroup::"
           
-  Verify_NonProd_Deployment:
+Verify_NonProd_Deployment:
     needs: [Deploy_To_NonProd, Build_And_Upload_NonProd]
     if: needs.Deploy_To_NonProd.result == 'success'
     runs-on: ubuntu-latest
@@ -399,11 +399,14 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
+      - name: Create Artifacts Directory
+        run: |
+          mkdir -p artifacts
+
       - name: Save Revision
         id: save-revision
         run: |
           echo "${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}" > artifacts/revision.txt
-
 
   Request_Production_Approval:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_NonProd]
