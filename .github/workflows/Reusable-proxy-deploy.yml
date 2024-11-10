@@ -200,10 +200,7 @@ jobs:
             curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
             echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      Build_And_Upload_NonProd:
-    # ... [Previous configurations remain same]
-    steps:
-      # ... [Previous steps remain same until Create API bundle]
+
 
       - name: Create API bundle
         id: create-bundle
