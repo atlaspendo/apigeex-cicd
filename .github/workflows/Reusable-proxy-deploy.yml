@@ -123,23 +123,33 @@ jobs:
           echo "deployment_type=$DEPLOY_TYPE" >> $GITHUB_OUTPUT
           echo "deployment_status=$STATUS" >> $GITHUB_OUTPUT
 
-  Setup_NonProd_Auth:
+  Setup_Auth:
     needs: validate_deployment_inputs
-    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
+    if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     runs-on: ubuntu-latest
     outputs:
-      access_token: ${{ steps.auth.outputs.access_token }}
+      nonprod_token: ${{ steps.nonprod_auth.outputs.access_token }}
+      prod_token: ${{ steps.prod_auth.outputs.access_token }}
     steps:
-      - name: Authenticate to Non-Prod Google Cloud
-        id: auth
+      - name: Non-Prod Authentication
+        id: nonprod_auth
         uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
           token_format: 'access_token'
 
+      - name: Prod Authentication
+        id: prod_auth
+        if: inputs.environment_type == 'prod'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: 'access_token'
+
   Validate_API_Proxy:
-    needs: [validate_deployment_inputs, Setup_NonProd_Auth]
+    needs: [validate_deployment_inputs, Setup_Auth]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -168,7 +178,7 @@ jobs:
           fi
 
   Build_And_Upload_NonProd:
-    needs: [Setup_NonProd_Auth, validate_deployment_inputs, Validate_API_Proxy]
+    needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
     outputs:
@@ -191,6 +201,9 @@ jobs:
       - name: Create API bundle
         id: create-bundle
         run: |
+          # Create artifacts directory
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          
           create_bundle() {
             local source_dir="$1"
             echo "Creating bundle from: $source_dir"
@@ -199,6 +212,8 @@ jobs:
             cd temp_bundle
             zip -r ../proxy.zip apiproxy
             cd ..
+            # Save bundle for prod deployment
+            cp proxy.zip $GITHUB_WORKSPACE/artifacts/proxy.zip
             echo "Zip contents:"
             unzip -l proxy.zip
             rm -rf temp_bundle
@@ -213,20 +228,12 @@ jobs:
             exit 1
           fi
 
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ inputs.is_production == true && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD || secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ inputs.is_production == true && secrets.SERVICE_ACCOUNT_PROD || secrets.SERVICE_ACCOUNT }}
-          token_format: 'access_token'
-
       - name: Upload and Get Revision
         id: upload
         env:
-          APIGEE_ORG: ${{ inputs.is_production == true && secrets.APIGEE_ORG_PROD || secrets.APIGEE_ORG }}
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
+          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.nonprod_token }}
         uses: nick-invision/retry@v2
         with:
           timeout_minutes: 10
@@ -235,9 +242,8 @@ jobs:
             echo "Using organization: $APIGEE_ORG"
             echo "Using proxy name: $PROXY_NAME"
             
-            # Add delay before upload
             echo "Waiting 10 seconds before upload..."
-            sleep 30
+            sleep 10
             
             IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
               -n "$PROXY_NAME" \
@@ -252,7 +258,6 @@ jobs:
               exit 1
             fi
             
-            # Add delay after upload
             echo "Waiting 30 seconds for upload to process..."
             sleep 30
             
@@ -263,15 +268,20 @@ jobs:
               exit 1
             fi
             
+            # Save revision number for prod deployment
+            echo "$LATEST_REVISION" > $GITHUB_WORKSPACE/artifacts/revision.txt
+            
             echo "Latest revision: $LATEST_REVISION"
             echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
 
-      - name: Verify Upload
-        if: success()
-        run: |
-          echo "Waiting 15 seconds to verify upload..."
-          sleep 10
-          echo "Upload verification complete"
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: proxy-artifacts
+          path: |
+            ${{ github.workspace }}/artifacts/proxy.zip
+            ${{ github.workspace }}/artifacts/revision.txt
+          retention-days: 1
 
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
@@ -392,157 +402,59 @@ jobs:
           echo "Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
 
 
-  Setup_Prod_Auth:
-    needs: [Request_Production_Approval]
-    if: always() && needs.Request_Production_Approval.result == 'success'
-    runs-on: ubuntu-latest
-    outputs:
-      access_token: ${{ steps.auth.outputs.access_token }}
-    steps:
-      - name: Authenticate to Prod Google Cloud
-        id: auth
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: 'access_token'
-
   Build_And_Upload_Prod:
-    needs: [Setup_Prod_Auth, Request_Production_Approval]
+    needs: [Setup_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install apigeecli
-        id: install-apigeecli
-        uses: nick-invision/retry@v2
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
         with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: |
-            mkdir -p $HOME/.apigeecli/bin
-            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
-            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+          name: proxy-artifacts
+          path: artifacts
 
-      - name: Create API bundle
-        id: create-bundle
-        run: |
-          create_bundle() {
-            local source_dir="$1"
-            echo "Creating bundle from: $source_dir"
-            mkdir -p temp_bundle
-            cp -r "$source_dir" temp_bundle/apiproxy
-            cd temp_bundle
-            zip -r ../proxy.zip apiproxy
-            cd ..
-            echo "Zip contents:"
-            unzip -l proxy.zip
-            rm -rf temp_bundle
-          }
-          
-          if [ -d "${{ inputs.proxy_directory }}" ]; then
-            create_bundle "${{ inputs.proxy_directory }}"
-          elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
-            create_bundle "src/${{ inputs.proxy_directory }}"
-          else
-            echo "Error: Could not find apiproxy directory"
-            exit 1
-          fi
-
-      - name: Get GCP Token
-        id: get-token
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: 'access_token'
-
-      - name: Upload and Get Revision
-        id: upload
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.get-token.outputs.access_token }}
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            echo "Using organization: $APIGEE_ORG"
-            echo "Using proxy name: $PROXY_NAME"
-            
-            # Add delay before upload
-            echo "Waiting 10 seconds before upload..."
-            sleep 30
-            
-            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-              -n "$PROXY_NAME" \
-              -p proxy.zip \
-              --org "$APIGEE_ORG" \
-              --token "$ACCESS_TOKEN")
-            
-            echo "Import output: $IMPORT_OUTPUT"
-            
-            if [ $? -ne 0 ]; then
-              echo "Failed to import API proxy bundle"
-              exit 1
-            fi
-            
-            # Add delay after upload
-            echo "Waiting 30 seconds for upload to process..."
-            sleep 30
-            
-            LATEST_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-            
-            if [ -z "$LATEST_REVISION" ]; then
-              echo "Failed to get revision number"
-              exit 1
-            fi
-            
-            echo "Latest revision: $LATEST_REVISION"
-            echo "revision=$LATEST_REVISION" >> $GITHUB_OUTPUT
-
-      - name: Verify Upload
-        if: success()
-        run: |
-          echo "Waiting 15 seconds to verify upload..."
-          sleep 10
-          echo "Upload verification complete"
-
-  Deploy_To_Production:
-    needs: [Build_And_Upload_Prod, Request_Production_Approval]
-    if: always() && needs.Request_Production_Approval.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
       - name: Install apigeecli
         run: |
           mkdir -p $HOME/.apigeecli/bin
           curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
           echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
 
-      - name: Get GCP Token
-        id: auth
-        uses: 'google-github-actions/auth@v1'
-        with:
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: 'access_token'
-
-      - name: Deploy to Production
-        id: deployment
+      - name: Upload to Production
+        id: upload
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.prod_token }}
+        run: |
+          TARGET_REVISION=$(cat artifacts/revision.txt)
+          echo "Using target revision: $TARGET_REVISION"
+          
+          echo "Importing bundle to production org..."
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "$PROXY_NAME" \
+            -p artifacts/proxy.zip \
+            --org "$APIGEE_ORG" \
+            --token "$ACCESS_TOKEN")
+          
+          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+
+  Deploy_To_Production:
+    needs: [Build_And_Upload_Prod, Request_Production_Approval]
+    if: always() && needs.Request_Production_Approval.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        env:
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.prod_token }}
           REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         run: |
           echo "Deploying to production organization's test-env environment"
           
-          # When deploying to production org, always use test-env
           if [ "${{ inputs.environment_group }}" == "default" ]; then
             DEPLOY_ENV="test-env"
           else
