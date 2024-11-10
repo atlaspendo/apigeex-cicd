@@ -556,3 +556,51 @@ jobs:
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
 
+  Deployment_Summary:
+    needs: [Verify_NonProd_Deployment, Build_And_Upload_Prod, Build_And_Upload_NonProd, Deploy_To_Production, Deploy_To_NonProd, Request_Production_Approval]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate Deployment Summary
+        id: summary
+        run: |
+          echo "::group::📊 Deployment Summary"
+
+          echo "## Deployment Summary"
+
+          echo "### Authentication"
+          echo "| Stage | Status |"
+          echo "| --- | --- |"
+          echo "| Non-Prod Authentication | ${{ needs.Setup_Auth.outputs.nonprod_token != '' && 'success' || 'failed' }} |"
+          echo "| Prod Authentication | ${{ needs.Setup_Auth.outputs.prod_token != '' && 'success' || 'failed' }} |"
+
+          echo "### API Proxy Validation"
+          echo "| Stage | Status |"
+          echo "| --- | --- |"
+          echo "| API Proxy Validation | ${{ needs.Validate_API_Proxy.result == 'success' && 'success' || 'failed' }} |"
+
+          echo "### Non-Prod Deployment"
+          echo "| Stage | Status | Revision |"
+          echo "| --- | --- | --- |"
+          echo "| Build and Upload | ${{ needs.Build_And_Upload_NonProd.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
+          echo "| Deploy to Non-Prod | ${{ needs.Deploy_To_NonProd.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
+          echo "| Verify Non-Prod | ${{ needs.Verify_NonProd_Deployment.outputs.status }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
+
+          echo "### Production Deployment"
+          echo "| Stage | Status | Revision |"
+          echo "| --- | --- | --- |"
+          echo "| Request Production Approval | ${{ needs.Request_Production_Approval.result == 'success' && 'success' || 'failed' }} | ${{ needs.Request_Production_Approval.outputs.revision }} |"
+          echo "| Build and Upload | ${{ needs.Build_And_Upload_Prod.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }} |"
+          echo "| Deploy to Production | ${{ needs.Deploy_To_Production.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }} |"
+          echo "| Verify Production | ${{ needs.Verify_Prod_Deployment.outputs.status }} | ${{ needs.Verify_Prod_Deployment.outputs.revision }} |"
+
+          echo "::endgroup::"
+
+      - name: Save Deployment Summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-summary
+          path: |
+            - README.md
+          retention-days: 30
