@@ -409,6 +409,17 @@ jobs:
           echo "Content of revision.txt:"
           cat artifacts/revision.txt
 
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
       - name: Get GCP Token
         id: get-token
         uses: 'google-github-actions/auth@v1'
@@ -433,21 +444,44 @@ jobs:
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --token "$TOKEN")
           
+          echo "Import output: $IMPORT_OUTPUT"
+          
           NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
 
   Deploy_To_Production:
-    needs: [Build_And_Upload_Prod, Request_Production_Approval]
-    if: always() && needs.Request_Production_Approval.result == 'success'
+    needs: [Build_And_Upload_Prod]
+    if: needs.Build_And_Upload_Prod.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+
+      - name: Get GCP Token
+        id: get-token
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: 'access_token'
+          create_credentials_file: true
+
       - name: Deploy to Production
         env:
           APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
           PROXY_NAME: ${{ inputs.proxy_name }}
-          ACCESS_TOKEN: ${{ needs.Setup_Auth.outputs.prod_token }}
           REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         run: |
+          TOKEN=$(gcloud auth print-access-token)
+          
           echo "Deploying to production organization's test-env environment"
           
           if [ "${{ inputs.environment_group }}" == "default" ]; then
@@ -463,6 +497,6 @@ jobs:
             --org "$APIGEE_ORG" \
             --env "$DEPLOY_ENV" \
             --rev "$REVISION" \
-            --token "$ACCESS_TOKEN" \
+            --token "$TOKEN" \
             --ovr \
             --wait
