@@ -56,7 +56,7 @@ on:
 permissions:
   contents: read
   id-token: write
-  issues: write
+  #issues: write
   deployments: write
   #environments: read
 
