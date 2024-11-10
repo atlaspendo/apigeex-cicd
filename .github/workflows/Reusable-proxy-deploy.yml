@@ -540,12 +540,21 @@ jobs:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         run: |
-          echo "Deploying to production environment"
+          echo "Deploying to production organization's test-env environment"
+          
+          # When deploying to production org, always use test-env
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="test-env"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-test-env"
+          fi
+          
+          echo "Deploying to environment: $DEPLOY_ENV"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "$PROXY_NAME" \
             --org "$APIGEE_ORG" \
-            --env "prod" \
+            --env "$DEPLOY_ENV" \
             --rev "$REVISION" \
             --token "$ACCESS_TOKEN" \
             --ovr \
