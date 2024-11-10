@@ -179,7 +179,7 @@ jobs:
             exit 1
           fi
 
- Build_And_Upload_NonProd:
+  Build_And_Upload_NonProd:
     needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true' && inputs.is_production != true
     runs-on: ubuntu-latest
