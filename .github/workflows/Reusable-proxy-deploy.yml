@@ -57,6 +57,7 @@ permissions:
   contents: read
   id-token: write
   deployments: write
+  issues: write
 
 jobs:
   validate_deployment_inputs:
@@ -588,11 +589,19 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      # Previous summary generation step remains the same
-
       - name: Send Deployment Summary Email
-        if: always()
         uses: actions/github-script@v7
+        env:
+          VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
+          AUTH_RESULT: ${{ needs.Setup_Auth.result }}
+          LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
+          NONPROD_BUILD_RESULT: ${{ needs.Build_And_Upload_NonProd.result }}
+          NONPROD_DEPLOY_RESULT: ${{ needs.Deploy_To_NonProd.result }}
+          NONPROD_VERIFY_RESULT: ${{ needs.Verify_NonProd_Deployment.result }}
+          PROD_BUILD_RESULT: ${{ needs.Build_And_Upload_Prod.result }}
+          PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
+          NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+          PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         with:
           script: |
             const emailBody = `
@@ -606,103 +615,65 @@ jobs:
 
             ## Status Summary
             ### Authentication
-            - Non-Prod Auth: ${{ needs.Setup_Auth.result == 'success' && '✅ Success' || '❌ Failed' }}
-            - Prod Auth: ${{ needs.Setup_Auth.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Non-Prod Auth: ${process.env.AUTH_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
 
             ### API Proxy Validation
-            - Apigeelint: ${{ needs.Validate_API_Proxy.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            - Apigeelint: ${process.env.LINT_RESULT === 'success' ? '✅ Passed' : '❌ Failed'}
 
             ### Non-Production Deployment
-            - Build & Upload: ${{ needs.Build_And_Upload_NonProd.result == 'success' && '✅ Success' || '❌ Failed' }}
-            - Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            - Deployment: ${{ needs.Deploy_To_NonProd.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Build & Upload: ${process.env.NONPROD_BUILD_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
+            - Revision: ${process.env.NONPROD_REVISION}
+            - Deployment: ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
             - Environment: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
-            - Verification: ${{ needs.Verify_NonProd_Deployment.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Verification: ${process.env.NONPROD_VERIFY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
 
             ### Production Deployment
-            ${needs.Build_And_Upload_Prod.result ? `
-            - Build & Upload: ${{ needs.Build_And_Upload_Prod.result == 'success' && '✅ Success' || '❌ Failed' }}
-            - Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
-            - Deployment: ${{ needs.Deploy_To_Production.result == 'success' && '✅ Success' || '❌ Failed' }}
+            ${process.env.PROD_BUILD_RESULT ? `
+            - Build & Upload: ${process.env.PROD_BUILD_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
+            - Revision: ${process.env.PROD_REVISION}
+            - Deployment: ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
             - Environment: ${{ inputs.environment_group }}-test-env
             ` : '- Production Deployment: ⏭️ Not Required'}
 
             ## Revision Information
-            - Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            ${needs.Build_And_Upload_Prod.outputs.latest_revision ? `- Production Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}` : ''}
+            - Non-Prod Revision: ${process.env.NONPROD_REVISION}
+            ${process.env.PROD_REVISION ? `- Production Revision: ${process.env.PROD_REVISION}` : ''}
 
             ## Deployment URL
-            ${context.payload.repository.html_url}/actions/runs/${context.runId}
+            ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
 
             This is an automated message from GitHub Actions.
             `;
 
-            // Get initiator's email
+            // Get the workflow initiator's username
             const initiator = context.actor;
-            const { data: user } = await github.rest.users.getByUsername({
-              username: initiator
-            });
-            
-            const emailTo = user.email || `${initiator}@users.noreply.github.com`;
 
-            // Create notification issue that will trigger email
+            // Create an issue to notify the user
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[Deployment Summary] ${inputs.proxy_name} - ${new Date().toISOString()}`,
+              title: `Deployment Summary: ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅' : '❌'} ${inputs.proxy_name}`,
               body: emailBody,
               assignees: [initiator],
               labels: ['deployment-notification']
             });
 
-            // Add comment to the issue for email notification
-            const issues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: 'deployment-notification',
-              state: 'open',
-              per_page: 1
-            });
-
-            if (issues.data.length > 0) {
-              const issueNumber = issues.data[0].number;
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body: `@${initiator} Deployment summary has been sent to your email.`
-              });
-
-              // Close the issue
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                state: 'closed'
-              });
-            }
-
-      - name: Send Direct Email Notification
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const notificationBody = `
-            Deployment Status: ${needs.Deploy_To_NonProd.result === 'success' ? 'SUCCESS ✅' : 'FAILED ❌'}
-            
-            Quick Summary:
-            - Proxy: ${{ inputs.proxy_name }}
-            - Environment: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
-            - Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            ${needs.Build_And_Upload_Prod.outputs.latest_revision ? `- Prod Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}` : ''}
-            
-            Check full details at: ${context.payload.repository.html_url}/actions/runs/${context.runId}
-            `;
-
-            // Create a notification that will trigger email
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number || context.payload.pull_request?.number,
-              body: `@${context.actor} ${notificationBody}`
-            });
+      - name: Post Summary to Step Summary
+        run: |
+          {
+            echo "# Apigee Proxy Deployment Summary 🚀"
+            echo
+            echo "## Final Status"
+            echo
+            echo "### Non-Production Deployment"
+            echo "- Build & Upload: ${{ needs.Build_And_Upload_NonProd.result }}"
+            echo "- Deployment: ${{ needs.Deploy_To_NonProd.result }}"
+            echo "- Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+            echo
+            if [[ "${{ needs.Build_And_Upload_Prod.result }}" != "" ]]; then
+              echo "### Production Deployment"
+              echo "- Build & Upload: ${{ needs.Build_And_Upload_Prod.result }}"
+              echo "- Deployment: ${{ needs.Deploy_To_Production.result }}"
+              echo "- Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
