@@ -444,8 +444,7 @@ jobs:
           echo "::group::📦 Preparing Production Deployment"
           echo "Verifying artifacts..."
           ls -la artifacts/
-          echo "📝 Revision to deploy:"
-          cat artifacts/revision.txt
+          echo "📝 Source revision: $(cat artifacts/revision.txt)"
           echo "✅ Artifacts verified successfully"
           echo "::endgroup::"
 
@@ -472,12 +471,31 @@ jobs:
           token_format: 'access_token'
           create_credentials_file: true
 
+      - name: Modify Bundle for Production
+        run: |
+          echo "::group::📦 Preparing Production Bundle"
+          SOURCE_REVISION=$(cat artifacts/revision.txt)
+          echo "Source revision: $SOURCE_REVISION"
+          
+          # Extract the bundle
+          unzip -q artifacts/proxy.zip -d temp_extract
+          
+          # Update any production-specific configurations here if needed
+          
+          # Repackage the bundle
+          cd temp_extract
+          zip -r ../prod_proxy.zip apiproxy
+          cd ..
+          
+          echo "✅ Production bundle prepared"
+          echo "::endgroup::"
+
       - name: Upload to Production
         id: upload
         run: |
           echo "::group::📤 Uploading to Production"
-          TARGET_REVISION=$(cat artifacts/revision.txt)
-          echo "📝 Target revision: $TARGET_REVISION"
+          SOURCE_REVISION=$(cat artifacts/revision.txt)
+          echo "📝 Source revision: $SOURCE_REVISION"
           
           TOKEN=$(gcloud auth print-access-token)
           
@@ -489,16 +507,22 @@ jobs:
           echo "Importing bundle to production org..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
-            -p artifacts/proxy.zip \
+            -p prod_proxy.zip \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
-            --token "$TOKEN" \
-            --rev "$TARGET_REVISION")  # Specify the target revision
+            --token "$TOKEN")
           
           echo "Import response received"
           
-          # Use the same revision number from non-prod
-          echo "✅ Successfully uploaded to production org with revision: $TARGET_REVISION"
-          echo "revision=$TARGET_REVISION" >> $GITHUB_OUTPUT
+          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          if [ -z "$NEW_REVISION" ]; then
+            echo "❌ Failed to get revision number"
+            exit 1
+          fi
+          
+          echo "✅ Successfully uploaded to production org"
+          echo "📝 Original revision: $SOURCE_REVISION"
+          echo "📝 Production revision: $NEW_REVISION"
+          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
   Deploy_To_Production:
@@ -539,19 +563,16 @@ jobs:
             exit 1
           fi
           
-          # Get the revision number from artifacts
-          REVISION=$(cat artifacts/revision.txt)
-          
-          echo "Deploying to production organization's test-env environment"
-          
           if [ "${{ inputs.environment_group }}" == "default" ]; then
             DEPLOY_ENV="test-env"
           else
             DEPLOY_ENV="${{ inputs.environment_group }}-test-env"
           fi
           
+          REVISION="${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: $REVISION"
+          echo "📦 Deploying revision: $REVISION"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
@@ -576,7 +597,7 @@ jobs:
           echo "::group::📋 Deployment Summary"
           echo "✅ Production deployment completed successfully"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: $REVISION"
+          echo "📝 Deployed revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
