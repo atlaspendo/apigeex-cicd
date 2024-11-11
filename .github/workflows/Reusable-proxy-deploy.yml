@@ -439,12 +439,15 @@ jobs:
           name: proxy-artifacts
           path: artifacts
 
-      - name: Use Non-Prod Revision
-        id: use-revision
+      - name: List Downloaded Artifacts
         run: |
-          REVISION=$(cat artifacts/revision.txt)
-          echo "Using revision: $REVISION"
-          echo "revision=$REVISION" >> $GITHUB_OUTPUT
+          echo "::group::📦 Preparing Production Deployment"
+          echo "Verifying artifacts..."
+          ls -la artifacts/
+          echo "📝 Revision to deploy:"
+          cat artifacts/revision.txt
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"
 
       - name: Install apigeecli
         id: install-apigeecli
@@ -473,9 +476,17 @@ jobs:
         id: upload
         run: |
           echo "::group::📤 Uploading to Production"
-          REVISION=${{ needs.Request_Production_Approval.outputs.revision }}
-          echo "📝 Target revision: $REVISION"
+          TARGET_REVISION=$(cat artifacts/revision.txt)
+          echo "📝 Target revision: $TARGET_REVISION"
           
+          TOKEN=$(gcloud auth print-access-token)
+          
+          if [ -z "$TOKEN" ]; then
+            echo "❌ Failed to get GCP token"
+            exit 1
+          fi
+          
+          echo "Importing bundle to production org..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
             -p artifacts/proxy.zip \
@@ -494,10 +505,6 @@ jobs:
           echo "📝 New revision: $NEW_REVISION"
           echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
-
-      - name: Verify Revision
-        run: |
-          echo "Revision: ${{ steps.upload.outputs.revision }}"
 
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod]
@@ -527,23 +534,15 @@ jobs:
           token_format: 'access_token'
           create_credentials_file: true
 
-      - name: Download Artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: proxy-artifacts
-          path: artifacts
-
-      - name: Get Revision from Artifact
-        id: get-revision
-        run: |
-          REVISION=$(cat artifacts/revision.txt)
-          echo "Revision: $REVISION"
-          echo "revision=$REVISION" >> $GITHUB_OUTPUT
-
       - name: Deploy to Production
         run: |
           echo "::group::🚀 Deploying to Production"
           TOKEN=$(gcloud auth print-access-token)
+          
+          if [ -z "$TOKEN" ]; then
+            echo "❌ Failed to get GCP token"
+            exit 1
+          fi
           
           echo "Deploying to production organization's test-env environment"
           
@@ -554,7 +553,7 @@ jobs:
           fi
           
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: ${{ steps.get-revision.outputs.revision }}"
+          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
@@ -565,19 +564,24 @@ jobs:
             --ovr \
             --wait
 
-          echo "✅ Successfully deployed to production environment"
+          if [ $? -eq 0 ]; then
+            echo "✅ Successfully deployed to production environment"
+          else
+            echo "❌ Production deployment failed"
+            exit 1
+          fi
           echo "::endgroup::"
 
       - name: Post-Deployment Summary
+        if: success()
         run: |
           echo "::group::📋 Deployment Summary"
           echo "✅ Production deployment completed successfully"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ steps.get-revision.outputs.revision }}"
+          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
-
           
   Deployment_Summary:
     needs: [Verify_NonProd_Deployment, Build_And_Upload_Prod, Build_And_Upload_NonProd, Deploy_To_Production, Deploy_To_NonProd, Request_Production_Approval]
