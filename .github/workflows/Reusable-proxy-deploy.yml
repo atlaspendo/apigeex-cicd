@@ -589,8 +589,14 @@ jobs:
     needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      id-token: write
+      deployments: write
+      issues: write
     steps:
-      - name: Generate Summary
+      - name: Generate Step Summary
         env:
           PROXY_NAME: ${{ inputs.proxy_name }}
           ENV_GROUP: ${{ inputs.environment_group }}
@@ -685,24 +691,57 @@ jobs:
                 echo "| Production | \`$PROD_REVISION\` | ❌ Failed |"
               fi
             fi
-            echo
-            echo "## 🔗 Deployment Details"
-            echo "For more information, please check the deployment logs in GitHub Actions."
-            echo
-            echo "---"
-            echo "⚡ *Generated at: $(date)*"
           } >> $GITHUB_STEP_SUMMARY
 
-      - name: Notify User
+      - name: Create Email Notification
         uses: actions/github-script@v7
         with:
           script: |
-            const workflowUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            
-            const notification = {
-              title: '🚀 Apigee Proxy Deployment Completed',
-              message: `Deployment of ${process.env.PROXY_NAME} completed.\nClick to view details.`,
-              url: workflowUrl
-            };
-            
-            core.notice(`${notification.title}\n${notification.message}\n${notification.url}`);
+            const summary = `# 🚀 Apigee Proxy Deployment Summary
+
+            @${context.actor}, your deployment has completed!
+
+            ## 📋 Deployment Status
+            | Category | Details |
+            |----------|---------|
+            | Proxy Name | \`${{ inputs.proxy_name }}\` |
+            | Environment | \`${{ inputs.environment_group }}-${{ inputs.environment_type }}\` |
+            | Non-Prod Status | ${needs.Deploy_To_NonProd.result === 'success' ? '✅ Success' : '❌ Failed'} |
+            | Non-Prod Revision | \`${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}\` |
+            ${needs.Build_And_Upload_Prod.result ? `| Prod Status | ${needs.Deploy_To_Production.result === 'success' ? '✅ Success' : '❌ Failed'} |
+            | Prod Revision | \`${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}\` |` : ''}
+
+            ## 🔗 Details
+            [View Full Deployment Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+
+            ---
+            ⚡ *Generated at ${new Date().toISOString()}*`;
+
+            // Create a temporary issue that will trigger notification
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment Summary: ${{ inputs.proxy_name }}`,
+              body: summary,
+              labels: ['deployment-notification']
+            });
+
+            // Add a comment to trigger additional notification
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.data.number,
+              body: `@${context.actor} Deployment summary has been generated.`
+            });
+
+            // Close the issue immediately
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.data.number,
+              state: 'closed'
+            });
+
+      - name: Notify in GitHub UI
+        run: |
+          echo "::notice title=🚀 Deployment Complete::Deployment of ${{ inputs.proxy_name }} has finished. Check your notifications for details."
