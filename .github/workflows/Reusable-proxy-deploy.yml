@@ -589,137 +589,105 @@ jobs:
     needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
     if: always()
     runs-on: ubuntu-latest
-
     steps:
-    - name: Generate Deployment Summary
-      id: summary
-      env:
-        PROXY_NAME: ${{ inputs.proxy_name }}
-        ENV_GROUP: ${{ inputs.environment_group }}
-        ENV_TYPE: ${{ inputs.environment_type }}
-        VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
-        AUTH_RESULT: ${{ needs.Setup_Auth.result }}
-        LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
-        NONPROD_BUILD_RESULT: ${{ needs.Build_And_Upload_NonProd.result }}
-        NONPROD_DEPLOY_RESULT: ${{ needs.Deploy_To_NonProd.result }}
-        NONPROD_VERIFY_RESULT: ${{ needs.Verify_NonProd_Deployment.result }}
-        PROD_BUILD_RESULT: ${{ needs.Build_And_Upload_Prod.result }}
-        PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
-        NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-        PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
-      run: |
-        # Create the deployment summary in a Markdown table format
-        echo "| Category | Details |" >> $GITHUB_STEP_SUMMARY
-        echo "|----------|---------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Proxy Name | \`${{ env.PROXY_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Environment Group | \`${{ env.ENV_GROUP }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Environment Type | \`${{ env.ENV_TYPE }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Deployment Time | \`$(date)\` |" >> $GITHUB_STEP_SUMMARY
+      - name: Generate and Send Summary
+        uses: actions/github-script@v7
+        env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENV_GROUP: ${{ inputs.environment_group }}
+          ENV_TYPE: ${{ inputs.environment_type }}
+          VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
+          AUTH_RESULT: ${{ needs.Setup_Auth.result }}
+          LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
+          NONPROD_BUILD_RESULT: ${{ needs.Build_And_Upload_NonProd.result }}
+          NONPROD_DEPLOY_RESULT: ${{ needs.Deploy_To_NonProd.result }}
+          NONPROD_VERIFY_RESULT: ${{ needs.Verify_NonProd_Deployment.result }}
+          PROD_BUILD_RESULT: ${{ needs.Build_And_Upload_Prod.result }}
+          PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
+          NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+          PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
+        with:
+          script: |
+            const summaryBody = `@${context.actor} Deployment Summary:
+            
+            # 🚀 Apigee Proxy Deployment Summary
 
-        echo "## Deployment Status" >> $GITHUB_STEP_SUMMARY
-        echo "| Stage | Status | Details |" >> $GITHUB_STEP_SUMMARY
-        echo "|-------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+            ## 📋 Basic Information
+            | Category | Details |
+            |----------|---------|
+            | 📦 Proxy Name | \`${process.env.PROXY_NAME}\` |
+            | 🌍 Environment Group | \`${process.env.ENV_GROUP}\` |
+            | 🎯 Environment Type | \`${process.env.ENV_TYPE}\` |
+            | ⏰ Deployment Time | \`${new Date().toISOString()}\` |
 
-        # Authentication & Validation
-        if [[ "${{ env.AUTH_RESULT }}" == "success" ]]; then
-          echo "| Authentication | ✅ | Successful |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| Authentication | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
-        if [[ "${{ env.LINT_RESULT }}" == "success" ]]; then
-          echo "| API Lint Check | ✅ | Passed |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| API Lint Check | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
+            ## 🔄 Deployment Status
 
-        # Non-Production Deployment
-        if [[ "${{ env.NONPROD_BUILD_RESULT }}" == "success" ]]; then
-          echo "| Build & Upload | ✅ | Revision: \`${{ env.NONPROD_REVISION }}\` |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| Build & Upload | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
-        if [[ "${{ env.NONPROD_DEPLOY_RESULT }}" == "success" ]]; then
-          echo "| Deployment | ✅ | Env: \`${{ env.ENV_GROUP }}-${{ env.ENV_TYPE }}\` |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| Deployment | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
-        if [[ "${{ env.NONPROD_VERIFY_RESULT }}" == "success" ]]; then
-          echo "| Verification | ✅ | Passed |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| Verification | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
+            ### 🔐 Authentication & Validation
+            | Stage | Status | Details |
+            |-------|--------|----------|
+            | Authentication | ${process.env.AUTH_RESULT === 'success' ? '✅' : '❌'} | ${process.env.AUTH_RESULT === 'success' ? 'Successful' : 'Failed'} |
+            | API Lint Check | ${process.env.LINT_RESULT === 'success' ? '✅' : '❌'} | ${process.env.LINT_RESULT === 'success' ? 'Passed' : 'Failed'} |
 
-        # Production Deployment
-        if [ -n "${{ env.PROD_BUILD_RESULT }}" ]; then
-          echo "| Build & Upload | \`${{ env.PROD_BUILD_RESULT }}\` | Revision: \`${{ env.PROD_REVISION }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deployment | \`${{ env.PROD_DEPLOY_RESULT }}\` | Env: \`${{ env.ENV_GROUP }}-test-env\` |" >> $GITHUB_STEP_SUMMARY
-        fi
+            ### 🔵 Non-Production Deployment
+            | Stage | Status | Details |
+            |-------|--------|----------|
+            | Build & Upload | ${process.env.NONPROD_BUILD_RESULT === 'success' ? '✅' : '❌'} | Revision: \`${process.env.NONPROD_REVISION}\` |
+            | Deployment | ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅' : '❌'} | Env: \`${process.env.ENV_GROUP}-${process.env.ENV_TYPE}\` |
+            | Verification | ${process.env.NONPROD_VERIFY_RESULT === 'success' ? '✅' : '❌'} | ${process.env.NONPROD_VERIFY_RESULT === 'success' ? 'Successful' : 'Failed'} |
 
-        echo "## Revision Information" >> $GITHUB_STEP_SUMMARY
-        echo "| Environment | Revision | Status |" >> $GITHUB_STEP_SUMMARY
-        echo "|------------|----------|---------|" >> $GITHUB_STEP_SUMMARY
-        if [[ "${{ env.NONPROD_BUILD_RESULT }}" == "success" ]]; then
-          echo "| Non-Production | \`${{ env.NONPROD_REVISION }}\` | ✅ Active |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| Non-Production | \`${{ env.NONPROD_REVISION }}\` | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-        fi
-        if [ -n "${{ env.PROD_REVISION }}" ]; then
-          if [[ "${{ env.PROD_DEPLOY_RESULT }}" == "success" ]]; then
-            echo "| Production | \`${{ env.PROD_REVISION }}\` | ✅ Active |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Production | \`${{ env.PROD_REVISION }}\` | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-        fi
+            ${process.env.PROD_BUILD_RESULT ? `
+            ### 🔴 Production Deployment
+            | Stage | Status | Details |
+            |-------|--------|----------|
+            | Build & Upload | ${process.env.PROD_BUILD_RESULT === 'success' ? '✅' : '❌'} | Revision: \`${process.env.PROD_REVISION}\` |
+            | Deployment | ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅' : '❌'} | Env: \`${process.env.ENV_GROUP}-test-env\` |
+            ` : ''}
 
-        echo "## Deployment Details" >> $GITHUB_STEP_SUMMARY
-        echo "For more information, please check the deployment logs in GitHub Actions." >> $GITHUB_STEP_SUMMARY
-        echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "⚡ *Generated at: $(date)*" >> $GITHUB_STEP_SUMMARY
+            ## 📊 Revision Summary
+            | Environment | Revision | Status |
+            |------------|----------|---------|
+            | Non-Production | \`${process.env.NONPROD_REVISION}\` | ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅ Active' : '❌ Failed'} |
+            ${process.env.PROD_REVISION ? `| Production | \`${process.env.PROD_REVISION}\` | ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅ Active' : '❌ Failed'} |` : ''}
 
-    - name: Send Deployment Summary Email
-      if: always()
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: smtp.gmail.com
-        server_port: 465
-        subject: Apigee Proxy Deployment Summary
-        body: $GITHUB_STEP_SUMMARY
-        to: ${{ github.actor }}@users.noreply.github.com
-        from: GitHub Actions
+            ## 🔗 Quick Links
+            - [View Deployment Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            - [View Repository](${context.serverUrl}/${context.repo.owner}/${context.repo.repo})
 
-    - name: Create Issue for Deployment Summary
-      if: always()
-      uses: actions/github-script@v7
-      env:
-        DEPLOYMENT_SUMMARY: ${{ steps.summary.outputs.summary }}
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const emailBody = `
-          # Apigee Proxy Deployment Summary 🚀
+            ---
+            ⚡ *Generated at: ${new Date().toISOString()}*`;
 
-          ## Deployment Information
+            // Create a comment that will trigger notification
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number || context.payload.pull_request?.number,
+              body: summaryBody
+            });
+
+      - name: Save Step Summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          # 🚀 Apigee Proxy Deployment Summary
+          
+          ## 📋 Basic Information
           | Category | Details |
           |----------|---------|
-          | Proxy Name | \`${{ inputs.proxy_name }}\` |
-          | Environment Group | \`${{ inputs.environment_group }}\` |
-          | Environment Type | \`${{ inputs.environment_type }}\` |
-          | Deployment Time | \`$(new Date().toISOString())\` |
-
-          ## Deployment Status
-          | Stage | Status | Details |
-          |-------|--------|----------|
-          ${{ env.DEPLOYMENT_SUMMARY }}
-
-          ## Deployment Details
-          For more information, please check the deployment logs in GitHub Actions.
-          `;
-
-          await github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: `Apigee Proxy Deployment Summary: ${{ inputs.proxy_name }}`,
-            body: emailBody,
-            assignees: [context.actor],
-            labels: ['deployment-notification']
-          });
+          | 📦 Proxy Name | \`${PROXY_NAME}\` |
+          | 🌍 Environment Group | \`${ENV_GROUP}\` |
+          | 🎯 Environment Type | \`${ENV_TYPE}\` |
+          | ⏰ Deployment Time | \`$(date)\` |
+          
+          ## 🔄 Final Status
+          | Stage | Result |
+          |-------|--------|
+          | Validation | ${VALIDATION_RESULT} |
+          | Authentication | ${AUTH_RESULT} |
+          | Non-Prod Deployment | ${NONPROD_DEPLOY_RESULT} |
+          | Production Deployment | ${PROD_DEPLOY_RESULT:-"Not Required"} |
+          
+          ## 📊 Revision Information
+          | Environment | Revision |
+          |------------|----------|
+          | Non-Production | ${NONPROD_REVISION} |
+          ${PROD_REVISION:+"| Production | ${PROD_REVISION} |"}
+          EOF
