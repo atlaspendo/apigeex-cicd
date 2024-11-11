@@ -431,7 +431,7 @@ jobs:
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
     outputs:
-      latest_revision: ${{ steps.upload.outputs.revision }}
+      latest_revision: ${{ steps.upload_and_sync.outputs.revision }}
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v3
@@ -471,58 +471,44 @@ jobs:
           token_format: 'access_token'
           create_credentials_file: true
 
-      - name: Modify Bundle for Production
-        run: |
-          echo "::group::📦 Preparing Production Bundle"
-          SOURCE_REVISION=$(cat artifacts/revision.txt)
-          echo "Source revision: $SOURCE_REVISION"
-          
-          # Extract the bundle
-          unzip -q artifacts/proxy.zip -d temp_extract
-          
-          # Update any production-specific configurations here if needed
-          
-          # Repackage the bundle
-          cd temp_extract
-          zip -r ../prod_proxy.zip apiproxy
-          cd ..
-          
-          echo "✅ Production bundle prepared"
-          echo "::endgroup::"
-
-      - name: Upload to Production
-        id: upload
+      - name: Upload and Sync Revision
+        id: upload_and_sync
         run: |
           echo "::group::📤 Uploading to Production"
           SOURCE_REVISION=$(cat artifacts/revision.txt)
-          echo "📝 Source revision: $SOURCE_REVISION"
+          echo "📝 Target revision: $SOURCE_REVISION"
           
           TOKEN=$(gcloud auth print-access-token)
           
-          if [ -z "$TOKEN" ]; then
-            echo "❌ Failed to get GCP token"
-            exit 1
-          fi
+          # Calculate how many uploads needed to reach target revision
+          echo "Synchronizing revision numbers..."
           
-          echo "Importing bundle to production org..."
+          # First upload to get current revision
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
-            -p prod_proxy.zip \
+            -p artifacts/proxy.zip \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --token "$TOKEN")
           
-          echo "Import response received"
+          CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          echo "Current revision in prod: $CURRENT_REVISION"
           
-          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          if [ -z "$NEW_REVISION" ]; then
-            echo "❌ Failed to get revision number"
-            exit 1
-          fi
+          # Continue uploading until we reach or exceed the target revision
+          while [ "$CURRENT_REVISION" -lt "$SOURCE_REVISION" ]; do
+            echo "Uploading to increment revision..."
+            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+              -n "${{ inputs.proxy_name }}" \
+              -p artifacts/proxy.zip \
+              --org "${{ secrets.APIGEE_ORG_PROD }}" \
+              --token "$TOKEN")
+            
+            CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+            echo "Updated revision: $CURRENT_REVISION"
+          done
           
-          echo "✅ Successfully uploaded to production org"
-          echo "📝 Original revision: $SOURCE_REVISION"
-          echo "📝 Production revision: $NEW_REVISION"
-          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "✅ Successfully synced revision numbers"
+          echo "📝 Final revision: $CURRENT_REVISION"
+          echo "revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
   Deploy_To_Production:
@@ -557,11 +543,6 @@ jobs:
         run: |
           echo "::group::🚀 Deploying to Production"
           TOKEN=$(gcloud auth print-access-token)
-          
-          if [ -z "$TOKEN" ]; then
-            echo "❌ Failed to get GCP token"
-            exit 1
-          fi
           
           if [ "${{ inputs.environment_group }}" == "default" ]; then
             DEPLOY_ENV="test-env"
