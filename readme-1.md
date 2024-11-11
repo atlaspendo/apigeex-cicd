@@ -242,8 +242,7 @@ gcloud iam workload-identity-pools providers describe "github" \
 5. Create a Pull Request
 
 ## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Belongs to ATLAS-PENDO
 
 ## 🙋‍♂️ Support
 
@@ -251,4 +250,4 @@ Create an issue in the repository for any questions or problems.
 
 ---
 
-Made with ❤️ by [Your Organization]
+Made with ❤️ by [atlas-pendo]
