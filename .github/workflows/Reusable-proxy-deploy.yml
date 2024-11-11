@@ -584,50 +584,140 @@ jobs:
           echo "::endgroup::"
           
   Deployment_Summary:
-    needs: [Verify_NonProd_Deployment, Build_And_Upload_Prod, Build_And_Upload_NonProd, Deploy_To_Production, Deploy_To_NonProd, Request_Production_Approval]
+    needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
     if: always()
     runs-on: ubuntu-latest
-    
     steps:
       - name: Generate Deployment Summary
-        id: summary
+        env:
+          VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
+          AUTH_RESULT: ${{ needs.Setup_Auth.result }}
+          LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
+          BUILD_NONPROD_RESULT: ${{ needs.Build_And_Upload_NonProd.result }}
+          DEPLOY_NONPROD_RESULT: ${{ needs.Deploy_To_NonProd.result }}
+          VERIFY_NONPROD_RESULT: ${{ needs.Verify_NonProd_Deployment.result }}
+          BUILD_PROD_RESULT: ${{ needs.Build_And_Upload_Prod.result }}
+          DEPLOY_PROD_RESULT: ${{ needs.Deploy_To_Production.result }}
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENVIRONMENT_GROUP: ${{ inputs.environment_group }}
+          ENVIRONMENT_TYPE: ${{ inputs.environment_type }}
+          NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+          PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
         run: |
-          echo "::group::📊 Deployment Summary"
+          {
+            echo "# Apigee Proxy Deployment Summary 🚀"
+            echo
+            echo "## Basic Information"
+            echo "| Item | Value |"
+            echo "|------|-------|"
+            echo "| Proxy Name | ${PROXY_NAME} |"
+            echo "| Environment Group | ${ENVIRONMENT_GROUP} |"
+            echo "| Environment Type | ${ENVIRONMENT_TYPE} |"
+            echo "| Deployment Time | $(date) |"
+            echo
+            
+            echo "## Input Validation"
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            if [ "$VALIDATION_RESULT" == "success" ]; then
+              echo "| Configuration Validation | ✅ Passed |"
+            else
+              echo "| Configuration Validation | ❌ Failed |"
+            fi
+            
+            echo
+            echo "## Authentication Status"
+            echo "| Stage | Status |"
+            echo "|-------|--------|"
+            if [ "$AUTH_RESULT" == "success" ]; then
+              echo "| Non-Prod Authentication | ✅ Success |"
+              echo "| Production Authentication | ✅ Success |"
+            else
+              echo "| Authentication | ❌ Failed |"
+            fi
+            
+            echo
+            echo "## API Proxy Validation"
+            echo "| Check | Status |"
+            echo "|-------|--------|"
+            if [ "$LINT_RESULT" == "success" ]; then
+              echo "| Apigeelint Check | ✅ Passed |"
+            else
+              echo "| Apigeelint Check | ❌ Failed |"
+            fi
+            
+            echo
+            echo "## Non-Production Deployment"
+            echo "| Stage | Status | Details |"
+            echo "|-------|--------|----------|"
+            
+            # Build and Upload Status
+            if [ "$BUILD_NONPROD_RESULT" == "success" ]; then
+              echo "| Build & Upload | ✅ Success | Revision: ${NONPROD_REVISION} |"
+            elif [ "$BUILD_NONPROD_RESULT" == "skipped" ]; then
+              echo "| Build & Upload | ⏭️ Skipped | - |"
+            else
+              echo "| Build & Upload | ❌ Failed | - |"
+            fi
+            
+            # Deployment Status
+            if [ "$DEPLOY_NONPROD_RESULT" == "success" ]; then
+              echo "| Deployment | ✅ Success | Environment: ${ENVIRONMENT_GROUP}-${ENVIRONMENT_TYPE} |"
+            elif [ "$DEPLOY_NONPROD_RESULT" == "skipped" ]; then
+              echo "| Deployment | ⏭️ Skipped | - |"
+            else
+              echo "| Deployment | ❌ Failed | - |"
+            fi
+            
+            # Verification Status
+            if [ "$VERIFY_NONPROD_RESULT" == "success" ]; then
+              echo "| Verification | ✅ Success | - |"
+            elif [ "$VERIFY_NONPROD_RESULT" == "skipped" ]; then
+              echo "| Verification | ⏭️ Skipped | - |"
+            else
+              echo "| Verification | ❌ Failed | - |"
+            fi
+            
+            echo
+            echo "## Production Deployment"
+            echo "| Stage | Status | Details |"
+            echo "|-------|--------|----------|"
+            
+            # Only show production info if we got to production stages
+            if [ "$BUILD_PROD_RESULT" != "" ]; then
+              if [ "$BUILD_PROD_RESULT" == "success" ]; then
+                echo "| Build & Upload | ✅ Success | Revision: ${PROD_REVISION} |"
+              elif [ "$BUILD_PROD_RESULT" == "skipped" ]; then
+                echo "| Build & Upload | ⏭️ Skipped | - |"
+              else
+                echo "| Build & Upload | ❌ Failed | - |"
+              fi
+              
+              if [ "$DEPLOY_PROD_RESULT" == "success" ]; then
+                echo "| Deployment | ✅ Success | Environment: ${ENVIRONMENT_GROUP}-test-env |"
+              elif [ "$DEPLOY_PROD_RESULT" == "skipped" ]; then
+                echo "| Deployment | ⏭️ Skipped | - |"
+              else
+                echo "| Deployment | ❌ Failed | - |"
+              fi
+            else
+              echo "| Production Deployment | ⏭️ Not Required | - |"
+            fi
+            
+            echo
+            echo "## Revision Tracking"
+            echo "| Environment | Revision Number |"
+            echo "|-------------|-----------------|"
+            echo "| Non-Prod | ${NONPROD_REVISION} |"
+            if [ -n "${PROD_REVISION}" ]; then
+              echo "| Production | ${PROD_REVISION} |"
+            fi
+            
+          } >> $GITHUB_STEP_SUMMARY
 
-          echo "## Deployment Summary"
-
-          echo "### Authentication"
-          echo "| Stage | Status |"
-          echo "| --- | --- |"
-          echo "| Non-Prod Authentication | ${{ needs.Setup_Auth.outputs.nonprod_token != '' && 'success' || 'failed' }} |"
-          echo "| Prod Authentication | ${{ needs.Setup_Auth.outputs.prod_token != '' && 'success' || 'failed' }} |"
-
-          echo "### API Proxy Validation"
-          echo "| Stage | Status |"
-          echo "| --- | --- |"
-          echo "| API Proxy Validation | ${{ needs.Validate_API_Proxy.result == 'success' && 'success' || 'failed' }} |"
-
-          echo "### Non-Prod Deployment"
-          echo "| Stage | Status | Revision |"
-          echo "| --- | --- | --- |"
-          echo "| Build and Upload | ${{ needs.Build_And_Upload_NonProd.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
-          echo "| Deploy to Non-Prod | ${{ needs.Deploy_To_NonProd.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
-          echo "| Verify Non-Prod | ${{ needs.Verify_NonProd_Deployment.outputs.status }} | ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }} |"
-
-          echo "### Production Deployment"
-          echo "| Stage | Status | Revision |"
-          echo "| --- | --- | --- |"
-          echo "| Request Production Approval | ${{ needs.Request_Production_Approval.result == 'success' && 'success' || 'failed' }} | ${{ needs.Request_Production_Approval.outputs.revision }} |"
-          echo "| Build and Upload | ${{ needs.Build_And_Upload_Prod.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }} |"
-          echo "| Deploy to Production | ${{ needs.Deploy_To_Production.result == 'success' && 'success' || 'failed' }} | ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }} |"
-          echo "| Verify Production | ${{ needs.Verify_Prod_Deployment.outputs.status }} | ${{ needs.Verify_Prod_Deployment.outputs.revision }} |"
-
-          echo "::endgroup::"
-
-      - name: Save Deployment Summary
+      - name: Save Summary as Artifact
         uses: actions/upload-artifact@v3
         with:
           name: deployment-summary
-          path: |
-            - README.md
+          path: $GITHUB_STEP_SUMMARY
           retention-days: 30
