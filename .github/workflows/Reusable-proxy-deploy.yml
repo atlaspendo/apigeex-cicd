@@ -586,14 +586,14 @@ jobs:
 
 
   Deployment_Summary:
-     needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
-     if: always()
-     runs-on: ubuntu-latest
+    needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
+    if: always()
+    runs-on: ubuntu-latest
 
-     steps:
-     - name: Generate Deployment Summary
-       id: summary
-       env:
+    steps:
+    - name: Generate Deployment Summary
+      id: summary
+      env:
         PROXY_NAME: ${{ inputs.proxy_name }}
         ENV_GROUP: ${{ inputs.environment_group }}
         ENV_TYPE: ${{ inputs.environment_type }}
@@ -607,23 +607,20 @@ jobs:
         PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
         NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
         PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
-       run: |
-        echo "# 🚀 Apigee Proxy Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 📋 Basic Information" >> $GITHUB_STEP_SUMMARY
+      run: |
+        # Create the deployment summary in a Markdown table format
         echo "| Category | Details |" >> $GITHUB_STEP_SUMMARY
         echo "|----------|---------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 📦 Proxy Name | \`${{ env.PROXY_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🌍 Environment Group | \`${{ env.ENV_GROUP }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🎯 Environment Type | \`${{ env.ENV_TYPE }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| ⏰ Deployment Time | \`$(date)\` |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🔄 Deployment Status" >> $GITHUB_STEP_SUMMARY
+        echo "| Proxy Name | \`${{ env.PROXY_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Environment Group | \`${{ env.ENV_GROUP }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Environment Type | \`${{ env.ENV_TYPE }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Deployment Time | \`$(date)\` |" >> $GITHUB_STEP_SUMMARY
 
-        # Authentication & Validation
-        echo "### 🔐 Authentication & Validation" >> $GITHUB_STEP_SUMMARY
+        echo "## Deployment Status" >> $GITHUB_STEP_SUMMARY
         echo "| Stage | Status | Details |" >> $GITHUB_STEP_SUMMARY
         echo "|-------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+        # Authentication & Validation
         if [[ "${{ env.AUTH_RESULT }}" == "success" ]]; then
           echo "| Authentication | ✅ | Successful |" >> $GITHUB_STEP_SUMMARY
         else
@@ -636,9 +633,6 @@ jobs:
         fi
 
         # Non-Production Deployment
-        echo "### 🔵 Non-Production Deployment" >> $GITHUB_STEP_SUMMARY
-        echo "| Stage | Status | Details |" >> $GITHUB_STEP_SUMMARY
-        echo "|-------|--------|----------|" >> $GITHUB_STEP_SUMMARY
         if [[ "${{ env.NONPROD_BUILD_RESULT }}" == "success" ]]; then
           echo "| Build & Upload | ✅ | Revision: \`${{ env.NONPROD_REVISION }}\` |" >> $GITHUB_STEP_SUMMARY
         else
@@ -657,22 +651,11 @@ jobs:
 
         # Production Deployment
         if [ -n "${{ env.PROD_BUILD_RESULT }}" ]; then
-          echo "### 🔴 Production Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "| Stage | Status | Details |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|----------|" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ env.PROD_BUILD_RESULT }}" == "success" ]]; then
-            echo "| Build & Upload | ✅ | Revision: \`${{ env.PROD_REVISION }}\` |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Build & Upload | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [[ "${{ env.PROD_DEPLOY_RESULT }}" == "success" ]]; then
-            echo "| Deployment | ✅ | Env: \`${{ env.ENV_GROUP }}-test-env\` |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Deployment | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "| Build & Upload | \`${{ env.PROD_BUILD_RESULT }}\` | Revision: \`${{ env.PROD_REVISION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment | \`${{ env.PROD_DEPLOY_RESULT }}\` | Env: \`${{ env.ENV_GROUP }}-test-env\` |" >> $GITHUB_STEP_SUMMARY
         fi
 
-        echo "## 📊 Revision Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## Revision Information" >> $GITHUB_STEP_SUMMARY
         echo "| Environment | Revision | Status |" >> $GITHUB_STEP_SUMMARY
         echo "|------------|----------|---------|" >> $GITHUB_STEP_SUMMARY
         if [[ "${{ env.NONPROD_BUILD_RESULT }}" == "success" ]]; then
@@ -688,18 +671,55 @@ jobs:
           fi
         fi
 
-        echo "## 🔗 Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "## Deployment Details" >> $GITHUB_STEP_SUMMARY
         echo "For more information, please check the deployment logs in GitHub Actions." >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
         echo "⚡ *Generated at: $(date)*" >> $GITHUB_STEP_SUMMARY
 
-     - name: Send Deployment Summary Email
-       if: always()
-       uses: dawidd6/action-send-mail@v3
-       with:
+    - name: Send Deployment Summary Email
+      if: always()
+      uses: dawidd6/action-send-mail@v3
+      with:
         server_address: smtp.gmail.com
         server_port: 465
         subject: Apigee Proxy Deployment Summary
         body: $GITHUB_STEP_SUMMARY
         to: ${{ github.actor }}@users.noreply.github.com
         from: GitHub Actions
+
+    - name: Create Issue for Deployment Summary
+      if: always()
+      uses: actions/github-script@v7
+      env:
+        DEPLOYMENT_SUMMARY: ${{ steps.summary.outputs.summary }}
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const emailBody = `
+          # Apigee Proxy Deployment Summary 🚀
+
+          ## Deployment Information
+          | Category | Details |
+          |----------|---------|
+          | Proxy Name | \`${{ inputs.proxy_name }}\` |
+          | Environment Group | \`${{ inputs.environment_group }}\` |
+          | Environment Type | \`${{ inputs.environment_type }}\` |
+          | Deployment Time | \`$(new Date().toISOString())\` |
+
+          ## Deployment Status
+          | Stage | Status | Details |
+          |-------|--------|----------|
+          ${{ env.DEPLOYMENT_SUMMARY }}
+
+          ## Deployment Details
+          For more information, please check the deployment logs in GitHub Actions.
+          `;
+
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Apigee Proxy Deployment Summary: ${{ inputs.proxy_name }}`,
+            body: emailBody,
+            assignees: [context.actor],
+            labels: ['deployment-notification']
+          });
