@@ -453,48 +453,28 @@ jobs:
             
             ### 📋 Deployment Details
             - **Proxy:** ${{ inputs.proxy_name }}
-            - **Environment Group:** ${{ inputs.environment_group }}
             - **Non-Prod Revision:** ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
             - **Version ID:** ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
             
-            ### ✅ Non-Prod Deployment Summary
-            The proxy has been successfully deployed and verified in the non-production environment.
-            
             Please review the deployment details and approve the production deployment when ready.
-            
-            ### 👥 Approvers
-            - @apigee-admins
             
             ---
             
             ⚠️ *Production deployment will proceed once the required approvals are received.*
             
-          issue-assignees: "apigee-admins"
           issue-labels: "production-approval"
-          approve-workflow: true 
-          approve-workflow-run-id: ${{ github.run_id }}
 
-      - name: Pending Approval Notification
-        if: success()
-        run: |
-          echo "::notice title=⏳ Production Deployment Pending::Production deployment of ${{ inputs.proxy_name }} is pending approval. Further actions will resume once approved."
-          
-      - name: Input Approval Decision
-        run: |
-          echo "Approval Decision: ${{ steps.approval.outputs.decision }}"
-          echo "Workflow ID: ${{ steps.approval.outputs.workflow_run_id }}"
-
-      - name: Check Approval
+      - name: Approval Decision
+        if: steps.approval.outputs.decision == 'approve'
+        run: echo "::notice::✅ Production deployment approved. Proceeding with deployment."
+        
+      - name: Approval Rejected
         if: steps.approval.outputs.decision != 'approve'
         run: |
-          echo "::error::Production deployment was rejected. Aborting workflow."
+          echo "::error::❌ Production deployment rejected. Aborting workflow."
           exit 1
-          
-      - name: Approved Notification
-        if: steps.approval.outputs.decision == 'approve'    
-        run: |
-          echo "::notice title=✅ Production Deployment Approved::Production deployment of ${{ inputs.proxy_name }} has been approved. Proceeding with deployment."
 
+          
   Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
