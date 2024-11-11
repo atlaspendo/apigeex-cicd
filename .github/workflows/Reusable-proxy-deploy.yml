@@ -491,19 +491,14 @@ jobs:
             -n "${{ inputs.proxy_name }}" \
             -p artifacts/proxy.zip \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
-            --token "$TOKEN")
+            --token "$TOKEN" \
+            --rev "$TARGET_REVISION")  # Specify the target revision
           
           echo "Import response received"
           
-          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
-          if [ -z "$NEW_REVISION" ]; then
-            echo "❌ Failed to get revision number"
-            exit 1
-          fi
-          
-          echo "✅ Successfully uploaded to production org"
-          echo "📝 New revision: $NEW_REVISION"
-          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          # Use the same revision number from non-prod
+          echo "✅ Successfully uploaded to production org with revision: $TARGET_REVISION"
+          echo "revision=$TARGET_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
   Deploy_To_Production:
@@ -544,6 +539,9 @@ jobs:
             exit 1
           fi
           
+          # Get the revision number from artifacts
+          REVISION=$(cat artifacts/revision.txt)
+          
           echo "Deploying to production organization's test-env environment"
           
           if [ "${{ inputs.environment_group }}" == "default" ]; then
@@ -553,13 +551,13 @@ jobs:
           fi
           
           echo "📍 Target Environment: $DEPLOY_ENV"
-          echo "📦 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          echo "📦 Revision: $REVISION"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
             --name "${{ inputs.proxy_name }}" \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --env "$DEPLOY_ENV" \
-            --rev "${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}" \
+            --rev "$REVISION" \
             --token "$TOKEN" \
             --ovr \
             --wait
@@ -578,7 +576,7 @@ jobs:
           echo "::group::📋 Deployment Summary"
           echo "✅ Production deployment completed successfully"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+          echo "📝 Revision: $REVISION"
           echo "🌐 Environment: $DEPLOY_ENV"
           echo "⏱️ Completed at: $(date)"
           echo "::endgroup::"
