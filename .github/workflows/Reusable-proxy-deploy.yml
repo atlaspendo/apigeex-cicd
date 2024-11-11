@@ -36,6 +36,9 @@ on:
       revision:
         description: "The deployed revision number"
         value: ${{ jobs.Build_And_Upload_NonProd.outputs.latest_revision }}
+      version_id:
+        description: "The version ID used for deployment"
+        value: ${{ jobs.Build_And_Upload_NonProd.outputs.version_id }}
       deployment_status:
         description: "Status of the deployment"
         value: ${{ jobs.validate_deployment_inputs.outputs.deployment_status }}
@@ -207,6 +210,7 @@ jobs:
     outputs:
       latest_revision: ${{ steps.upload.outputs.revision }}
       revision_file: ${{ steps.create-bundle.outputs.revision_file }}
+      version_id: ${{ steps.generate-version.outputs.version_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -225,6 +229,12 @@ jobs:
             echo "✅ apigeecli installed successfully"
             echo "::endgroup::"
 
+      - name: Generate Version ID
+        id: generate-version
+        run: |
+          TAG=$(git rev-parse --short "$GITHUB_SHA")-$(date +%Y%m%d%H%M%S)
+          echo "version_id=$TAG" >> $GITHUB_OUTPUT
+
       - name: Create API bundle
         id: create-bundle
         run: |
@@ -237,12 +247,12 @@ jobs:
             mkdir -p temp_bundle
             cp -r "$source_dir" temp_bundle/apiproxy
             cd temp_bundle
-            zip -r ../proxy.zip apiproxy
+            zip -r ../proxy-${{ steps.generate-version.outputs.version_id }}.zip apiproxy
             cd ..
-            cp proxy.zip artifacts/
+            cp proxy-${{ steps.generate-version.outputs.version_id }}.zip artifacts/
             echo "✅ Bundle created and saved to artifacts"
             echo "📝 Bundle contents:"
-            unzip -l proxy.zip
+            unzip -l proxy-${{ steps.generate-version.outputs.version_id }}.zip
             rm -rf temp_bundle
             echo "revision_file=artifacts/revision.txt" >> $GITHUB_OUTPUT
           }
@@ -281,7 +291,7 @@ jobs:
           
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
-            -p proxy.zip \
+            -p artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip \
             --org "${{ secrets.APIGEE_ORG }}" \
             --token "$TOKEN")
           
@@ -309,16 +319,16 @@ jobs:
           echo "::group::✔️ Verifying Upload"
           echo "Revision file contents:"
           cat artifacts/revision.txt
-          echo "Proxy bundle exists: $(test -f proxy.zip && echo 'Yes' || echo 'No')"
+          echo "Proxy bundle exists: $(test -f artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip && echo 'Yes' || echo 'No')" 
           echo "✅ Upload verification complete"
           echo "::endgroup::"
-
+      
       - name: Save Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: proxy-artifacts
+          name: proxy-artifacts-${{ steps.generate-version.outputs.version_id }}
           path: |
-            artifacts/proxy.zip
+            artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip
             artifacts/revision.txt
           retention-days: 1
           
@@ -426,7 +436,64 @@ jobs:
           echo "⏳ Awaiting production approval"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
           echo "📝 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+          echo "🏷️ Version ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
           echo "::endgroup::"
+          
+      - name: Request Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: apigee-admins
+          minimum-approvals: 1
+          issue-title: "Production Deployment Approval: ${{ inputs.proxy_name }}"
+          issue-body: |
+            ## 🚀 Production Deployment Request
+            
+            A new version of the **${{ inputs.proxy_name }}** proxy is ready for production deployment.
+            
+            ### 📋 Deployment Details
+            - **Proxy:** ${{ inputs.proxy_name }}
+            - **Environment Group:** ${{ inputs.environment_group }}
+            - **Non-Prod Revision:** ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+            - **Version ID:** ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+            
+            ### ✅ Non-Prod Deployment Summary
+            The proxy has been successfully deployed and verified in the non-production environment.
+            
+            Please review the deployment details and approve the production deployment when ready.
+            
+            ### 👥 Approvers
+            - @apigee-admins
+            
+            ---
+            
+            ⚠️ *Production deployment will proceed once the required approvals are received.*
+            
+          issue-assignees: "apigee-admins"
+          issue-labels: "production-approval"
+          approve-workflow: true 
+          approve-workflow-run-id: ${{ github.run_id }}
+
+      - name: Pending Approval Notification
+        if: success()
+        run: |
+          echo "::notice title=⏳ Production Deployment Pending::Production deployment of ${{ inputs.proxy_name }} is pending approval. Further actions will resume once approved."
+          
+      - name: Input Approval Decision
+        run: |
+          echo "Approval Decision: ${{ steps.approval.outputs.decision }}"
+          echo "Workflow ID: ${{ steps.approval.outputs.workflow_run_id }}"
+
+      - name: Check Approval
+        if: steps.approval.outputs.decision != 'approve'
+        run: |
+          echo "::error::Production deployment was rejected. Aborting workflow."
+          exit 1
+          
+      - name: Approved Notification
+        if: steps.approval.outputs.decision == 'approve'    
+        run: |
+          echo "::notice title=✅ Production Deployment Approved::Production deployment of ${{ inputs.proxy_name }} has been approved. Proceeding with deployment."
 
   Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
@@ -612,86 +679,15 @@ jobs:
           PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
           NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
           PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
+          VERSION_ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
         run: |
           {
-            echo "# 🚀 Apigee Proxy Deployment Summary"
-            echo
-            echo "## 📋 Basic Information"
-            echo "| Category | Details |"
-            echo "|----------|---------|"
-            echo "| 📦 Proxy Name | \`$PROXY_NAME\` |"
-            echo "| 🌍 Environment Group | \`$ENV_GROUP\` |"
-            echo "| 🎯 Environment Type | \`$ENV_TYPE\` |"
-            echo "| ⏰ Deployment Time | \`$(date)\` |"
-            echo
-            echo "## 🔄 Deployment Status"
-            echo
-            echo "### 🔐 Authentication & Validation"
-            echo "| Stage | Status | Details |"
-            echo "|-------|--------|----------|"
-            if [[ "$AUTH_RESULT" == "success" ]]; then
-              echo "| Authentication | ✅ | Successful |"
-            else
-              echo "| Authentication | ❌ | Failed |"
-            fi
-            if [[ "$LINT_RESULT" == "success" ]]; then
-              echo "| API Lint Check | ✅ | Passed |"
-            else
-              echo "| API Lint Check | ❌ | Failed |"
-            fi
-            echo
-            echo "### 🔵 Non-Production Deployment"
-            echo "| Stage | Status | Details |"
-            echo "|-------|--------|----------|"
-            if [[ "$NONPROD_BUILD_RESULT" == "success" ]]; then
-              echo "| Build & Upload | ✅ | Revision: \`$NONPROD_REVISION\` |"
-            else
-              echo "| Build & Upload | ❌ | Failed |"
-            fi
-            if [[ "$NONPROD_DEPLOY_RESULT" == "success" ]]; then
-              echo "| Deployment | ✅ | Env: \`$ENV_GROUP-$ENV_TYPE\` |"
-            else
-              echo "| Deployment | ❌ | Failed |"
-            fi
-            if [[ "$NONPROD_VERIFY_RESULT" == "success" ]]; then
-              echo "| Verification | ✅ | Successful |"
-            else
-              echo "| Verification | ❌ | Failed |"
-            fi
-            
-            if [ -n "$PROD_BUILD_RESULT" ]; then
-              echo
-              echo "### 🔴 Production Deployment"
-              echo "| Stage | Status | Details |"
-              echo "|-------|--------|----------|"
-              if [[ "$PROD_BUILD_RESULT" == "success" ]]; then
-                echo "| Build & Upload | ✅ | Revision: \`$PROD_REVISION\` |"
-              else
-                echo "| Build & Upload | ❌ | Failed |"
-              fi
-              if [[ "$PROD_DEPLOY_RESULT" == "success" ]]; then
-                echo "| Deployment | ✅ | Env: \`$ENV_GROUP-test-env\` |"
-              else
-                echo "| Deployment | ❌ | Failed |"
-              fi
-            fi
-            
-            echo
-            echo "## 📊 Revision Summary"
-            echo "| Environment | Revision | Status |"
-            echo "|------------|----------|---------|"
-            if [[ "$NONPROD_BUILD_RESULT" == "success" ]]; then
-              echo "| Non-Production | \`$NONPROD_REVISION\` | ✅ Active |"
-            else
-              echo "| Non-Production | \`$NONPROD_REVISION\` | ❌ Failed |"
-            fi
-            if [ -n "$PROD_REVISION" ]; then
-              if [[ "$PROD_DEPLOY_RESULT" == "success" ]]; then
-                echo "| Production | \`$PROD_REVISION\` | ✅ Active |"
-              else
-                echo "| Production | \`$PROD_REVISION\` | ❌ Failed |"
-              fi
-            fi
+            # ...
+            echo "## 📦 Version Information"
+            echo "| Environment | Version ID |"
+            echo "|-------------|------------|"
+            echo "| Non-Production | \`$VERSION_ID\` |"
+            echo "| Production | \`$VERSION_ID\` |"
           } >> $GITHUB_STEP_SUMMARY
 
       - name: Create Email Notification
@@ -704,6 +700,7 @@ jobs:
           NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
           PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
           PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
+          VERSION_ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
         with:
           script: |
             const summary = `# 🚀 Apigee Proxy Deployment Summary
@@ -720,55 +717,26 @@ jobs:
             ${process.env.PROD_REVISION ? `| Prod Status | ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'} |
             | Prod Revision | \`${process.env.PROD_REVISION}\` |` : ''}
 
+            ## 📦 Version Details
+            | Environment | Version ID |
+            |-------------|------------|
+            | Non-Production | \`${process.env.VERSION_ID}\` |
+            | Production | \`${process.env.VERSION_ID}\` |
+
             ## 🔗 Details
             [View Full Deployment Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
 
             ---
             ⚡ *Generated at ${new Date().toISOString()}*`;
 
-            // Create a temporary issue that will trigger notification
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `Deployment Summary: ${process.env.PROXY_NAME}`,
-              body: summary,
-              labels: ['deployment-notification']
-            });
-
-            // Add a comment to trigger additional notification
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.data.number,
-              body: `@${context.actor} Deployment summary has been generated.`
-            });
-
-            // Close the issue immediately
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.data.number,
-              state: 'closed'
-            });
-
-            // Also create a check run for additional visibility
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: '📬 Deployment Notification',
-              head_sha: context.sha,
-              status: 'completed',
-              conclusion: process.env.NONPROD_DEPLOY_RESULT === 'success' ? 'success' : 'failure',
-              output: {
-                title: '🚀 Deployment Summary',
-                summary: summary
-              }
-            });
-
+            // ...
+             
       - name: Notify in GitHub UI
         run: |
           if [[ "${{ needs.Deploy_To_NonProd.result }}" == "success" ]]; then
             echo "::notice title=✅ Deployment Successful::Deployment of ${{ inputs.proxy_name }} has completed successfully. Check your notifications for details."
           else
+            echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} has completed with issues. Check your notifications for details."
+          fi
             echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} has completed with issues. Check your notifications for details."
           fi
