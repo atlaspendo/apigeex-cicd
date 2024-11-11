@@ -588,136 +588,121 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Generate Deployment Summary
-        env:
-          VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
-          AUTH_RESULT: ${{ needs.Setup_Auth.result }}
-          LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
-          BUILD_NONPROD_RESULT: ${{ needs.Build_And_Upload_NonProd.result }}
-          DEPLOY_NONPROD_RESULT: ${{ needs.Deploy_To_NonProd.result }}
-          VERIFY_NONPROD_RESULT: ${{ needs.Verify_NonProd_Deployment.result }}
-          BUILD_PROD_RESULT: ${{ needs.Build_And_Upload_Prod.result }}
-          DEPLOY_PROD_RESULT: ${{ needs.Deploy_To_Production.result }}
-          PROXY_NAME: ${{ inputs.proxy_name }}
-          ENVIRONMENT_GROUP: ${{ inputs.environment_group }}
-          ENVIRONMENT_TYPE: ${{ inputs.environment_type }}
-          NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-          PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
-        run: |
-          {
-            echo "# Apigee Proxy Deployment Summary 🚀"
-            echo
-            echo "## Basic Information"
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| Proxy Name | ${PROXY_NAME} |"
-            echo "| Environment Group | ${ENVIRONMENT_GROUP} |"
-            echo "| Environment Type | ${ENVIRONMENT_TYPE} |"
-            echo "| Deployment Time | $(date) |"
-            echo
-            
-            echo "## Input Validation"
-            echo "| Check | Status |"
-            echo "|-------|--------|"
-            if [ "$VALIDATION_RESULT" == "success" ]; then
-              echo "| Configuration Validation | ✅ Passed |"
-            else
-              echo "| Configuration Validation | ❌ Failed |"
-            fi
-            
-            echo
-            echo "## Authentication Status"
-            echo "| Stage | Status |"
-            echo "|-------|--------|"
-            if [ "$AUTH_RESULT" == "success" ]; then
-              echo "| Non-Prod Authentication | ✅ Success |"
-              echo "| Production Authentication | ✅ Success |"
-            else
-              echo "| Authentication | ❌ Failed |"
-            fi
-            
-            echo
-            echo "## API Proxy Validation"
-            echo "| Check | Status |"
-            echo "|-------|--------|"
-            if [ "$LINT_RESULT" == "success" ]; then
-              echo "| Apigeelint Check | ✅ Passed |"
-            else
-              echo "| Apigeelint Check | ❌ Failed |"
-            fi
-            
-            echo
-            echo "## Non-Production Deployment"
-            echo "| Stage | Status | Details |"
-            echo "|-------|--------|----------|"
-            
-            # Build and Upload Status
-            if [ "$BUILD_NONPROD_RESULT" == "success" ]; then
-              echo "| Build & Upload | ✅ Success | Revision: ${NONPROD_REVISION} |"
-            elif [ "$BUILD_NONPROD_RESULT" == "skipped" ]; then
-              echo "| Build & Upload | ⏭️ Skipped | - |"
-            else
-              echo "| Build & Upload | ❌ Failed | - |"
-            fi
-            
-            # Deployment Status
-            if [ "$DEPLOY_NONPROD_RESULT" == "success" ]; then
-              echo "| Deployment | ✅ Success | Environment: ${ENVIRONMENT_GROUP}-${ENVIRONMENT_TYPE} |"
-            elif [ "$DEPLOY_NONPROD_RESULT" == "skipped" ]; then
-              echo "| Deployment | ⏭️ Skipped | - |"
-            else
-              echo "| Deployment | ❌ Failed | - |"
-            fi
-            
-            # Verification Status
-            if [ "$VERIFY_NONPROD_RESULT" == "success" ]; then
-              echo "| Verification | ✅ Success | - |"
-            elif [ "$VERIFY_NONPROD_RESULT" == "skipped" ]; then
-              echo "| Verification | ⏭️ Skipped | - |"
-            else
-              echo "| Verification | ❌ Failed | - |"
-            fi
-            
-            echo
-            echo "## Production Deployment"
-            echo "| Stage | Status | Details |"
-            echo "|-------|--------|----------|"
-            
-            # Only show production info if we got to production stages
-            if [ "$BUILD_PROD_RESULT" != "" ]; then
-              if [ "$BUILD_PROD_RESULT" == "success" ]; then
-                echo "| Build & Upload | ✅ Success | Revision: ${PROD_REVISION} |"
-              elif [ "$BUILD_PROD_RESULT" == "skipped" ]; then
-                echo "| Build & Upload | ⏭️ Skipped | - |"
-              else
-                echo "| Build & Upload | ❌ Failed | - |"
-              fi
-              
-              if [ "$DEPLOY_PROD_RESULT" == "success" ]; then
-                echo "| Deployment | ✅ Success | Environment: ${ENVIRONMENT_GROUP}-test-env |"
-              elif [ "$DEPLOY_PROD_RESULT" == "skipped" ]; then
-                echo "| Deployment | ⏭️ Skipped | - |"
-              else
-                echo "| Deployment | ❌ Failed | - |"
-              fi
-            else
-              echo "| Production Deployment | ⏭️ Not Required | - |"
-            fi
-            
-            echo
-            echo "## Revision Tracking"
-            echo "| Environment | Revision Number |"
-            echo "|-------------|-----------------|"
-            echo "| Non-Prod | ${NONPROD_REVISION} |"
-            if [ -n "${PROD_REVISION}" ]; then
-              echo "| Production | ${PROD_REVISION} |"
-            fi
-            
-          } >> $GITHUB_STEP_SUMMARY
+      # Previous summary generation step remains the same
 
-      - name: Save Summary as Artifact
-        uses: actions/upload-artifact@v3
+      - name: Send Deployment Summary Email
+        if: always()
+        uses: actions/github-script@v7
         with:
-          name: deployment-summary
-          path: $GITHUB_STEP_SUMMARY
-          retention-days: 30
+          script: |
+            const emailBody = `
+            # Apigee Proxy Deployment Summary 🚀
+
+            ## Deployment Information
+            - **Proxy Name:** ${{ inputs.proxy_name }}
+            - **Environment Group:** ${{ inputs.environment_group }}
+            - **Environment Type:** ${{ inputs.environment_type }}
+            - **Deployment Time:** ${new Date().toISOString()}
+
+            ## Status Summary
+            ### Authentication
+            - Non-Prod Auth: ${{ needs.Setup_Auth.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Prod Auth: ${{ needs.Setup_Auth.result == 'success' && '✅ Success' || '❌ Failed' }}
+
+            ### API Proxy Validation
+            - Apigeelint: ${{ needs.Validate_API_Proxy.result == 'success' && '✅ Passed' || '❌ Failed' }}
+
+            ### Non-Production Deployment
+            - Build & Upload: ${{ needs.Build_And_Upload_NonProd.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+            - Deployment: ${{ needs.Deploy_To_NonProd.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Environment: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+            - Verification: ${{ needs.Verify_NonProd_Deployment.result == 'success' && '✅ Success' || '❌ Failed' }}
+
+            ### Production Deployment
+            ${needs.Build_And_Upload_Prod.result ? `
+            - Build & Upload: ${{ needs.Build_And_Upload_Prod.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
+            - Deployment: ${{ needs.Deploy_To_Production.result == 'success' && '✅ Success' || '❌ Failed' }}
+            - Environment: ${{ inputs.environment_group }}-test-env
+            ` : '- Production Deployment: ⏭️ Not Required'}
+
+            ## Revision Information
+            - Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+            ${needs.Build_And_Upload_Prod.outputs.latest_revision ? `- Production Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}` : ''}
+
+            ## Deployment URL
+            ${context.payload.repository.html_url}/actions/runs/${context.runId}
+
+            This is an automated message from GitHub Actions.
+            `;
+
+            // Get initiator's email
+            const initiator = context.actor;
+            const { data: user } = await github.rest.users.getByUsername({
+              username: initiator
+            });
+            
+            const emailTo = user.email || `${initiator}@users.noreply.github.com`;
+
+            // Create notification issue that will trigger email
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Deployment Summary] ${inputs.proxy_name} - ${new Date().toISOString()}`,
+              body: emailBody,
+              assignees: [initiator],
+              labels: ['deployment-notification']
+            });
+
+            // Add comment to the issue for email notification
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'deployment-notification',
+              state: 'open',
+              per_page: 1
+            });
+
+            if (issues.data.length > 0) {
+              const issueNumber = issues.data[0].number;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `@${initiator} Deployment summary has been sent to your email.`
+              });
+
+              // Close the issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed'
+              });
+            }
+
+      - name: Send Direct Email Notification
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const notificationBody = `
+            Deployment Status: ${needs.Deploy_To_NonProd.result === 'success' ? 'SUCCESS ✅' : 'FAILED ❌'}
+            
+            Quick Summary:
+            - Proxy: ${{ inputs.proxy_name }}
+            - Environment: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+            - Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+            ${needs.Build_And_Upload_Prod.outputs.latest_revision ? `- Prod Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}` : ''}
+            
+            Check full details at: ${context.payload.repository.html_url}/actions/runs/${context.runId}
+            `;
+
+            // Create a notification that will trigger email
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number || context.payload.pull_request?.number,
+              body: `@${context.actor} ${notificationBody}`
+            });
