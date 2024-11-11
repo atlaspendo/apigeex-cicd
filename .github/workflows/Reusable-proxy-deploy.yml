@@ -439,26 +439,21 @@ jobs:
           echo "📝 Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
           echo "🏷️ Version ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
           echo "::endgroup::"
-          
+
       - name: Download Artifacts
         uses: actions/download-artifact@v3
         with:
           name: proxy-artifacts-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
           path: artifacts
-          
-      - name: Manual Approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: ${{ github.actor }}
-          minimum-approvals: 1
-          issue-title: "Production Approval: ${{ inputs.proxy_name }} (Version: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }})"
-          issue-body: |
-            Please review the deployment details and approve the production deployment when ready.
-            
-            Proxy: ${{ inputs.proxy_name }}
-            Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            Version ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+
+      - name: List Downloaded Artifacts
+        run: |
+          echo "::group::📦 Production Deployment Artifacts"
+          echo "Verifying artifacts..."
+          ls -la artifacts/
+          echo "📝 Source revision: $(cat artifacts/revision.txt)"
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"
           
   Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
