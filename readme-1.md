@@ -32,27 +32,57 @@ A reusable GitHub Actions workflow for automated Apigee API proxy deployments wi
 ### Deployment Pipeline Flow
 ```mermaid
 flowchart TB
-    A[Start] --> B{Is Production?}
-    B -->|No| C[Non-Prod Flow]
-    B -->|Yes| D[Prod Flow]
+    Start((Start)) --> TriggerInput[/"Input Trigger:\n• proxy_name\n• environment_group\n• environment_type\n• is_production"/]
     
-    subgraph "Non-Prod Flow"
-        C --> E[Validate Inputs]
-        E --> F[Setup Auth]
-        F --> G[Validate Proxy]
-        G --> H[Build & Upload]
-        H --> I[Deploy]
-        I --> J[Verify]
+    subgraph "Validation Phase"
+        TriggerInput --> ValidateInputs["validate_deployment_inputs\n(Validates configs & params)"]
+        ValidateInputs --> EnvCheck{Environment\nCheck}
+        EnvCheck -->|Valid| Auth["Setup_Auth\n(GCP Authentication)"]
+        EnvCheck -->|Invalid| Fail1["❌ Validation\nFailure"]
     end
     
-    subgraph "Prod Flow"
-        D --> K[Production Approval]
-        K --> L[Sync Revisions]
-        L --> M[Deploy to Prod]
+    subgraph "Authentication Phase"
+        Auth --> NonProdAuth["Non-Prod Auth\n(Workload Identity)"]
+        Auth --> ProdAuth["Prod Auth\n(Workload Identity)"]
+        NonProdAuth --> ValidateProxy["Validate_API_Proxy\n(apigeelint)"]
+        ProdAuth --> ValidateProxy
     end
     
-    J --> N[Summary]
-    M --> N
+    subgraph "Build Phase"
+        ValidateProxy --> IsProd{Is Production?}
+        
+        IsProd -->|No| BuildNonProd["Build_And_Upload_NonProd\n• Create Bundle\n• Upload\n• Get Revision"]
+        BuildNonProd --> DeployNonProd["Deploy_To_NonProd\n• Environment Setup\n• Deploy\n• Verify"]
+        DeployNonProd --> VerifyNonProd["Verify_NonProd_Deployment\n• Status Check\n• Artifact Save"]
+        
+        IsProd -->|Yes| RequestApproval["Request_Production_Approval\n(Manual Approval Gate)"]
+    end
+    
+    subgraph "Production Phase"
+        RequestApproval -->|Approved| BuildProd["Build_And_Upload_Prod\n• Download Artifacts\n• Sync Revisions"]
+        BuildProd --> DeployProd["Deploy_To_Production\n• Production Config\n• Deploy\n• Verify"]
+        
+        RequestApproval -->|Rejected| Fail2["❌ Approval\nDenied"]
+    end
+    
+    subgraph "Summary Phase"
+        VerifyNonProd --> Summary["Deployment_Summary\n• Status Report\n• Notifications\n• Email"]
+        DeployProd --> Summary
+        
+        Summary --> End((End))
+        Fail1 --> End
+        Fail2 --> End
+    end
+    
+    classDef phase fill:#f9f,stroke:#333,stroke-width:2px
+    classDef success fill:#9f9,stroke:#333,stroke-width:2px
+    classDef failure fill:#f99,stroke:#333,stroke-width:2px
+    classDef decision fill:#fdf,stroke:#333,stroke-width:2px
+    
+    class ValidateInputs,Auth,ValidateProxy phase
+    class BuildNonProd,BuildProd,DeployNonProd,DeployProd success
+    class Fail1,Fail2 failure
+    class IsProd,EnvCheck decision
 ```
 
 ## 📋 Prerequisites
