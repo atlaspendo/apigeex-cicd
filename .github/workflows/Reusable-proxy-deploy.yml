@@ -439,42 +439,6 @@ jobs:
           echo "🏷️ Version ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
           echo "::endgroup::"
           
-      - name: Request Approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: apigee-admins
-          minimum-approvals: 1
-          issue-title: "Production Deployment Approval: ${{ inputs.proxy_name }}"
-          issue-body: |
-            ## 🚀 Production Deployment Request
-            
-            A new version of the **${{ inputs.proxy_name }}** proxy is ready for production deployment.
-            
-            ### 📋 Deployment Details
-            - **Proxy:** ${{ inputs.proxy_name }}
-            - **Non-Prod Revision:** ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
-            - **Version ID:** ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
-            
-            Please review the deployment details and approve the production deployment when ready.
-            
-            ---
-            
-            ⚠️ *Production deployment will proceed once the required approvals are received.*
-            
-          issue-labels: "production-approval"
-
-      - name: Approval Decision
-        if: steps.approval.outputs.decision == 'approve'
-        run: echo "::notice::✅ Production deployment approved. Proceeding with deployment."
-        
-      - name: Approval Rejected
-        if: steps.approval.outputs.decision != 'approve'
-        run: |
-          echo "::error::❌ Production deployment rejected. Aborting workflow."
-          exit 1
-
-          
   Build_And_Upload_Prod:
     needs: [Setup_Auth, Request_Production_Approval]
     if: always() && needs.Request_Production_Approval.result == 'success'
