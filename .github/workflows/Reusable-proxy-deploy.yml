@@ -592,6 +592,9 @@ jobs:
       - name: Send Deployment Summary Email
         uses: actions/github-script@v7
         env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENV_GROUP: ${{ inputs.environment_group }}
+          ENV_TYPE: ${{ inputs.environment_type }}
           VALIDATION_RESULT: ${{ needs.validate_deployment_inputs.result }}
           AUTH_RESULT: ${{ needs.Setup_Auth.result }}
           LINT_RESULT: ${{ needs.Validate_API_Proxy.result }}
@@ -608,9 +611,9 @@ jobs:
             # Apigee Proxy Deployment Summary 🚀
 
             ## Deployment Information
-            - **Proxy Name:** ${{ inputs.proxy_name }}
-            - **Environment Group:** ${{ inputs.environment_group }}
-            - **Environment Type:** ${{ inputs.environment_type }}
+            - **Proxy Name:** ${process.env.PROXY_NAME}
+            - **Environment Group:** ${process.env.ENV_GROUP}
+            - **Environment Type:** ${process.env.ENV_TYPE}
             - **Deployment Time:** ${new Date().toISOString()}
 
             ## Status Summary
@@ -624,7 +627,7 @@ jobs:
             - Build & Upload: ${process.env.NONPROD_BUILD_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
             - Revision: ${process.env.NONPROD_REVISION}
             - Deployment: ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
-            - Environment: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+            - Environment: ${process.env.ENV_GROUP}-${process.env.ENV_TYPE}
             - Verification: ${process.env.NONPROD_VERIFY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
 
             ### Production Deployment
@@ -632,7 +635,7 @@ jobs:
             - Build & Upload: ${process.env.PROD_BUILD_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
             - Revision: ${process.env.PROD_REVISION}
             - Deployment: ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'}
-            - Environment: ${{ inputs.environment_group }}-test-env
+            - Environment: ${process.env.ENV_GROUP}-test-env
             ` : '- Production Deployment: ⏭️ Not Required'}
 
             ## Revision Information
@@ -645,23 +648,29 @@ jobs:
             This is an automated message from GitHub Actions.
             `;
 
-            // Get the workflow initiator's username
-            const initiator = context.actor;
-
             // Create an issue to notify the user
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Deployment Summary: ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅' : '❌'} ${inputs.proxy_name}`,
+              title: `Deployment Summary: ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅' : '❌'} ${process.env.PROXY_NAME}`,
               body: emailBody,
-              assignees: [initiator],
+              assignees: [context.actor],
               labels: ['deployment-notification']
             });
 
       - name: Post Summary to Step Summary
+        env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENV_GROUP: ${{ inputs.environment_group }}
+          ENV_TYPE: ${{ inputs.environment_type }}
         run: |
           {
             echo "# Apigee Proxy Deployment Summary 🚀"
+            echo
+            echo "## Basic Information"
+            echo "- Proxy: $PROXY_NAME"
+            echo "- Environment Group: $ENV_GROUP"
+            echo "- Environment Type: $ENV_TYPE"
             echo
             echo "## Final Status"
             echo
