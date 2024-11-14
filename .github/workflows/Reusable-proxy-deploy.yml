@@ -698,44 +698,47 @@ jobs:
           
           echo "Starting cleanup for proxy: ${{ inputs.proxy_name }}"
           
-          # Get revisions
+          # Get revisions with error check
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions")
           
-          # Check if revisions request was successful
-          if [ $? -ne 0 ] || [ -z "$REVISIONS_JSON" ]; then
-            echo "❌ Failed to fetch revisions"
+          # Validate JSON response
+          if ! echo "$REVISIONS_JSON" | jq empty > /dev/null 2>&1; then
+            echo "❌ Invalid JSON response for revisions"
             echo "kept-count=0" >> $GITHUB_OUTPUT
             echo "deleted-count=0" >> $GITHUB_OUTPUT
             echo "failed-count=0" >> $GITHUB_OUTPUT
             exit 1
           fi
           
-          # Extract and sort revisions
-          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -nr)
+          # Create array of revisions and sort numerically in descending order
+          REVISIONS=($(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -nr))
           TOTAL_REVISIONS=${#REVISIONS[@]}
           
           echo "Found $TOTAL_REVISIONS revisions"
           
-          # Get deployed revision
-          ENV="${{ inputs.environment_type }}"
+          # Get deployed revision with error check
           DEPLOYED_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/$ENV/deployments")
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/${{ inputs.environment_type }}/deployments")
           
-          # Extract deployed revision for our proxy
-          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg PROXY "${{ inputs.proxy_name }}" '.deployments[] | select(.apiProxy==$PROXY) | .revision')
+          if ! echo "$DEPLOYED_JSON" | jq empty > /dev/null 2>&1; then
+            echo "❌ Invalid JSON response for deployments"
+            DEPLOYED_REV=""
+          else
+            DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg PROXY "${{ inputs.proxy_name }}" '.deployments[] | select(.apiProxy==$PROXY) | .revision // empty')
+          fi
           
           echo "Currently deployed revision: ${DEPLOYED_REV:-None}"
           
-          # Initialize counters and arrays
+          # Initialize arrays and counters
+          declare -a KEPT_REVS=()
+          declare -a DELETED_REVS=()
+          declare -a FAILED_REVS=()
+          KEPT=0
           DELETED=0
           FAILED=0
-          KEPT=0
-          KEPT_REVS=()
-          DELETED_REVS=()
-          FAILED_REVS=()
           
-          # Always keep the deployed revision if it exists
+          # Always preserve deployed revision if it exists
           if [ ! -z "$DEPLOYED_REV" ]; then
             KEPT_REVS+=("$DEPLOYED_REV")
             ((KEPT++))
@@ -743,30 +746,32 @@ jobs:
           
           # Process revisions
           for REV in "${REVISIONS[@]}"; do
-            # Skip if we've kept enough versions
-            if [ $KEPT -ge $KEEP_VERSIONS ]; then
-              # Don't delete deployed revision
-              if [ "$REV" != "$DEPLOYED_REV" ]; then
-                echo "Attempting to delete revision $REV"
-                STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                  -H "Authorization: Bearer $ACCESS_TOKEN" \
-                  "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
-                
-                if [ "$STATUS_CODE" = "200" ]; then
-                  ((DELETED++))
-                  DELETED_REVS+=("$REV")
-                  echo "✅ Successfully deleted revision $REV"
-                else
-                  ((FAILED++))
-                  FAILED_REVS+=("$REV")
-                  echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
-                fi
-              fi
+            # Skip if it's the deployed revision
+            if [ "$REV" = "$DEPLOYED_REV" ]; then
+              continue
+            fi
+            
+            # Keep up to KEEP_VERSIONS newest revisions
+            if [ $KEPT -lt $KEEP_VERSIONS ]; then
+              KEPT_REVS+=("$REV")
+              ((KEPT++))
+              echo "Keeping revision: $REV"
             else
-              # Keep this revision
-              if [ "$REV" != "$DEPLOYED_REV" ]; then
-                KEPT_REVS+=("$REV")
-                ((KEPT++))
+              echo "Attempting to delete revision $REV"
+              RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
+              
+              STATUS_CODE=$(echo "$RESPONSE" | tail -n1)
+              
+              if [ "$STATUS_CODE" = "200" ]; then
+                DELETED_REVS+=("$REV")
+                ((DELETED++))
+                echo "✅ Successfully deleted revision $REV"
+              else
+                FAILED_REVS+=("$REV")
+                ((FAILED++))
+                echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
               fi
             fi
           done
@@ -775,9 +780,21 @@ jobs:
           SUMMARY="Non-Prod Cleanup Summary:\n"
           SUMMARY+="- Total revisions before cleanup: $TOTAL_REVISIONS\n"
           SUMMARY+="- Currently deployed revision: ${DEPLOYED_REV:-None}\n"
-          SUMMARY+="- Versions kept (${#KEPT_REVS[@]}): ${KEPT_REVS[*]}\n"
-          SUMMARY+="- Versions deleted (${#DELETED_REVS[@]}): ${DELETED_REVS[*]}\n"
-          SUMMARY+="- Failed deletions (${#FAILED_REVS[@]}): ${FAILED_REVS[*]}\n"
+          if [ ${#KEPT_REVS[@]} -gt 0 ]; then
+            SUMMARY+="- Versions kept (${#KEPT_REVS[@]}): ${KEPT_REVS[*]}\n"
+          else
+            SUMMARY+="- Versions kept: None\n"
+          fi
+          if [ ${#DELETED_REVS[@]} -gt 0 ]; then
+            SUMMARY+="- Versions deleted (${#DELETED_REVS[@]}): ${DELETED_REVS[*]}\n"
+          else
+            SUMMARY+="- Versions deleted: None\n"
+          fi
+          if [ ${#FAILED_REVS[@]} -gt 0 ]; then
+            SUMMARY+="- Failed deletions (${#FAILED_REVS[@]}): ${FAILED_REVS[*]}\n"
+          else
+            SUMMARY+="- Failed deletions: None\n"
+          fi
           
           # Set outputs
           echo "kept-count=$KEPT" >> $GITHUB_OUTPUT
@@ -787,6 +804,11 @@ jobs:
           echo "nonprod_summary<<EOF" >> $GITHUB_ENV
           echo -e "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
+          
+          # Only exit with error if we had critical failures
+          if [ $FAILED -eq $TOTAL_REVISIONS ]; then
+            exit 1
+          fi
           
           echo "::endgroup::"
 
