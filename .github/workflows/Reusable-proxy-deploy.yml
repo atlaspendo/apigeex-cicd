@@ -682,12 +682,31 @@ jobs:
           VERSION_ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
         run: |
           {
-            # ...
+            echo "## 📊 Deployment Summary"
+            echo "### 📌 Deployment Details"
+            echo "| Category | Value |"
+            echo "|----------|--------|"
+            echo "| Proxy Name | \`$PROXY_NAME\` |"
+            echo "| Environment Group | \`$ENV_GROUP\` |"
+            echo "| Environment Type | \`$ENV_TYPE\` |"
+            
+            echo "### 🔄 Deployment Status"
+            echo "| Stage | Status |"
+            echo "|-------|--------|"
+            echo "| Validation | \`$VALIDATION_RESULT\` |"
+            echo "| Authentication | \`$AUTH_RESULT\` |"
+            echo "| Linting | \`$LINT_RESULT\` |"
+            echo "| Non-Prod Build | \`$NONPROD_BUILD_RESULT\` |"
+            echo "| Non-Prod Deploy | \`$NONPROD_DEPLOY_RESULT\` |"
+            echo "| Non-Prod Verify | \`$NONPROD_VERIFY_RESULT\` |"
+            [[ ! -z "$PROD_BUILD_RESULT" ]] && echo "| Prod Build | \`$PROD_BUILD_RESULT\` |"
+            [[ ! -z "$PROD_DEPLOY_RESULT" ]] && echo "| Prod Deploy | \`$PROD_DEPLOY_RESULT\` |"
+            
             echo "## 📦 Version Information"
             echo "| Environment | Version ID |"
             echo "|-------------|------------|"
             echo "| Non-Production | \`$VERSION_ID\` |"
-            echo "| Production | \`$VERSION_ID\` |"
+            [[ ! -z "$VERSION_ID" ]] && echo "| Production | \`$VERSION_ID\` |"
           } >> $GITHUB_STEP_SUMMARY
 
       - name: Create Email Notification
@@ -729,14 +748,17 @@ jobs:
             ---
             ⚡ *Generated at ${new Date().toISOString()}*`;
 
-            // ...
-             
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deployment Summary: ${process.env.PROXY_NAME} (${new Date().toISOString().split('T')[0]})`,
+              body: summary
+            });
+
       - name: Notify in GitHub UI
         run: |
           if [[ "${{ needs.Deploy_To_NonProd.result }}" == "success" ]]; then
             echo "::notice title=✅ Deployment Successful::Deployment of ${{ inputs.proxy_name }} has completed successfully. Check your notifications for details."
           else
-            echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} has completed with issues. Check your notifications for details."
-          fi
             echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} has completed with issues. Check your notifications for details."
           fi
