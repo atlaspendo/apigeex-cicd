@@ -4,18 +4,11 @@ on:
   workflow_call:
     inputs:
       proxy_directory:
-        description: Working directory to zip up as your proxy bundle
-        required: false
+        required: true
         type: string
-        default: apiproxy
-    secrets:
-      SERVICE_ACCOUNT:
-        required: true
-      SERVICE_ACCOUNT_PROD:
-        required: true
 
 jobs:
-  Validate_API_Proxy:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -24,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: '20'
 
       - name: Install apigeelint
         run: |
@@ -40,11 +33,5 @@ jobs:
       - name: Run apigeelint
         run: |
           echo "::group::🔍 Validating API Proxy"
-          echo "Running apigeelint validation..."
           apigeelint -s ${{ inputs.proxy_directory }} -f table.js
-          if [ $? -ne 0 ]; then
-            echo "❌ API proxy validation failed"
-            exit 1
-          fi
-          echo "✅ API proxy validation passed"
           echo "::endgroup::"
