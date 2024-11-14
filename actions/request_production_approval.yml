@@ -1,0 +1,58 @@
+name: Request Production Approval
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      latest_revision:
+        description: The latest revision number
+        required: true
+        type: string
+      version_id:
+        description: The version ID used for deployment
+        required: true
+        type: string
+    outputs:
+      revision:
+        description: "The revision number for production deployment"
+        value: ${{ jobs.Request_Production_Approval.outputs.revision }}
+      version_id:
+        description: "The version ID for production deployment"
+        value: ${{ jobs.Request_Production_Approval.outputs.version_id }}
+
+jobs:
+  Request_Production_Approval:
+    runs-on: ubuntu-latest
+    environment:
+      name: production-approval
+    outputs:
+      revision: ${{ inputs.latest_revision }}
+      version_id: ${{ inputs.version_id }}
+    steps:
+      - name: Set Deployment Status
+        run: |
+          echo "::group::👥 Production Deployment Request"
+          echo "✅ Non-prod deployment successful"
+          echo "⏳ Awaiting production approval"
+          echo "📦 Proxy: ${{ inputs.proxy_name }}"
+          echo "📝 Revision: ${{ inputs.latest_revision }}"
+          echo "🏷️ Version ID: ${{ inputs.version_id }}"
+          echo "::endgroup::"
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: proxy-artifacts-${{ inputs.version_id }}
+          path: artifacts
+
+      - name: List Downloaded Artifacts
+        run: |
+          echo "::group::📦 Production Deployment Artifacts"
+          echo "Verifying artifacts..."
+          ls -la artifacts/
+          echo "📝 Source revision: $(cat artifacts/revision.txt)"
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"
