@@ -1,15 +1,28 @@
+# File: .github/workflows/validate_api_proxy.yml
 name: Validate API Proxy
 
 on:
   workflow_call:
     inputs:
       proxy_directory:
+        description: Working directory to validate as your proxy bundle
         required: true
         type: string
+    outputs:
+      validation_status:
+        description: "Status of the validation"
+        value: ${{ jobs.validate.outputs.status }}
+      validation_details:
+        description: "Detailed validation results"
+        value: ${{ jobs.validate.outputs.details }}
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.validation.outputs.status }}
+      details: ${{ steps.validation.outputs.details }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,18 +33,170 @@ jobs:
           node-version: '20'
 
       - name: Install apigeelint
+        id: install-lint
         run: |
-          echo "::group::🔍 Installing API Proxy Validator"
+          echo "::group::🔧 Installing API Proxy Validator"
+          echo "Installing apigeelint globally..."
           npm install -g apigeelint
+          
           if [ $? -ne 0 ]; then
             echo "❌ Failed to install apigeelint"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Failed to install apigeelint tool" >> $GITHUB_OUTPUT
             exit 1
           fi
+          
           echo "✅ apigeelint installed successfully"
+          APIGEELINT_VERSION=$(apigeelint --version)
+          echo "📦 Installed apigeelint version: $APIGEELINT_VERSION"
+          echo "::endgroup::"
+
+      - name: Verify Proxy Directory
+        id: verify-directory
+        run: |
+          echo "::group::📁 Verifying Proxy Directory"
+          
+          # Check if directory exists
+          if [ ! -d "${{ inputs.proxy_directory }}" ]; then
+            echo "❌ Error: Directory ${{ inputs.proxy_directory }} not found"
+            echo "Checking alternative paths..."
+            
+            # Check src directory
+            if [ -d "src/${{ inputs.proxy_directory }}" ]; then
+              echo "✅ Found proxy directory in src/: src/${{ inputs.proxy_directory }}"
+              echo "proxy_path=src/${{ inputs.proxy_directory }}" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Error: Could not find proxy directory in any location"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "details=Proxy directory not found" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "✅ Found proxy directory: ${{ inputs.proxy_directory }}"
+            echo "proxy_path=${{ inputs.proxy_directory }}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "📝 Directory contents:"
+          ls -la ${{ inputs.proxy_directory }}
+          echo "::endgroup::"
+
+      - name: Check Proxy Structure
+        id: check-structure
+        run: |
+          echo "::group::🔍 Checking Proxy Structure"
+          PROXY_PATH="${{ steps.verify-directory.outputs.proxy_path }}"
+          
+          # Check essential files and directories
+          REQUIRED_FILES=(
+            "proxies"
+            "policies"
+            "targets"
+            "apiproxy.xml"
+          )
+          
+          MISSING_FILES=()
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -e "$PROXY_PATH/$file" ]; then
+              MISSING_FILES+=("$file")
+            fi
+          done
+          
+          if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+            echo "❌ Error: Missing required files/directories:"
+            printf '%s\n' "${MISSING_FILES[@]}"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Missing required proxy files: ${MISSING_FILES[*]}" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ All required proxy files present"
           echo "::endgroup::"
 
       - name: Run apigeelint
+        id: validation
+        continue-on-error: true
         run: |
-          echo "::group::🔍 Validating API Proxy"
-          apigeelint -s ${{ inputs.proxy_directory }} -f table.js
+          echo "::group::🔍 Running API Proxy Validation"
+          echo "Starting apigeelint validation..."
+          
+          PROXY_PATH="${{ steps.verify-directory.outputs.proxy_path }}"
+          
+          # Create output directory for reports
+          mkdir -p validation-reports
+          
+          # Run apigeelint with different formatters
+          echo "Running comprehensive validation..."
+          apigeelint -s "$PROXY_PATH" -f table.js > validation-reports/lint-table.txt
+          LINT_EXIT_CODE=$?
+          
+          # Also generate JSON report for parsing
+          apigeelint -s "$PROXY_PATH" -f json.js > validation-reports/lint-report.json
+          
+          # Parse results
+          ERRORS=$(grep -c "error" validation-reports/lint-report.json || true)
+          WARNINGS=$(grep -c "warn" validation-reports/lint-report.json || true)
+          
+          echo "📊 Validation Results:"
+          echo "- Errors: $ERRORS"
+          echo "- Warnings: $WARNINGS"
+          
+          # Set status based on results
+          if [ $LINT_EXIT_CODE -eq 0 ] && [ $ERRORS -eq 0 ]; then
+            echo "✅ Validation passed successfully"
+            echo "status=success" >> $GITHUB_OUTPUT
+            DETAILS="Validation passed with $WARNINGS warnings"
+          else
+            echo "⚠️ Validation completed with issues"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            DETAILS="Validation failed with $ERRORS errors and $WARNINGS warnings"
+          fi
+          
+          echo "details=$DETAILS" >> $GITHUB_OUTPUT
           echo "::endgroup::"
+
+      - name: Generate Validation Report
+        if: always()
+        run: |
+          echo "::group::📝 Generating Validation Report"
+          
+          # Create detailed report
+          cat << EOF > validation-reports/summary.md
+          # API Proxy Validation Report
+          
+          ## Overview
+          - **Status**: ${{ steps.validation.outputs.status }}
+          - **Details**: ${{ steps.validation.outputs.details }}
+          - **Proxy Directory**: ${{ steps.verify-directory.outputs.proxy_path }}
+          
+          ## Validation Results
+          \`\`\`
+          $(cat validation-reports/lint-table.txt)
+          \`\`\`
+          
+          ## Recommendations
+          $(if [ "${{ steps.validation.outputs.status }}" == "failed" ]; then
+            echo "- ❌ Please fix all errors before proceeding with deployment"
+            echo "- 🔍 Review the detailed results above for specific issues"
+          else
+            echo "- ✅ Proxy structure meets basic requirements"
+            echo "- 📝 Consider addressing any warnings in future updates"
+          fi)
+          EOF
+          
+          echo "✅ Report generated successfully"
+          echo "::endgroup::"
+
+      - name: Upload Validation Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-proxy-validation-results
+          path: validation-reports/
+          retention-days: 7
+
+      - name: Check Validation Status
+        if: steps.validation.outputs.status == 'failed'
+        run: |
+          echo "❌ API Proxy validation failed. Please check the validation report for details."
+          exit 1
