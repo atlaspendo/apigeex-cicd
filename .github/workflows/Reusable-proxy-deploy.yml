@@ -456,23 +456,39 @@ jobs:
           echo "::endgroup::"
           
   Build_And_Upload_Prod:
-    needs: [Setup_Auth, Request_Production_Approval]
+    needs: [Setup_Auth, Request_Production_Approval, Build_And_Upload_NonProd]  # Added Build_And_Upload_NonProd to needs
     if: always() && needs.Request_Production_Approval.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       latest_revision: ${{ steps.upload_and_sync.outputs.revision }}
     steps:
+      - name: Set Version ID
+        id: set-version
+        run: |
+          echo "VERSION_ID=${{ needs.Request_Production_Approval.outputs.version_id }}" >> $GITHUB_ENV
+
       - name: Download Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: proxy-artifacts-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+          name: proxy-artifacts-${{ needs.Request_Production_Approval.outputs.version_id }}
           path: artifacts
 
-      - name: List Downloaded Artifacts
+      - name: Verify Download
         run: |
-          echo "::group::📦 Preparing Production Deployment"
-          echo "Verifying artifacts..."
-          ls -la artifacts/
+          echo "::group::📦 Verifying Downloaded Artifacts"
+          echo "Looking for artifacts with version ID: ${{ needs.Request_Production_Approval.outputs.version_id }}"
+          ls -la artifacts/ || echo "Artifacts directory is empty or doesn't exist"
+          
+          if [ ! -f "artifacts/revision.txt" ]; then
+            echo "❌ Error: revision.txt not found"
+            exit 1
+          fi
+          
+          if [ ! -f "artifacts/proxy-${{ needs.Request_Production_Approval.outputs.version_id }}.zip" ]; then
+            echo "❌ Error: proxy bundle not found"
+            exit 1
+          fi
+          
           echo "📝 Source revision: $(cat artifacts/revision.txt)"
           echo "✅ Artifacts verified successfully"
           echo "::endgroup::"
@@ -509,15 +525,25 @@ jobs:
           
           TOKEN=$(gcloud auth print-access-token)
           
-          # Calculate how many uploads needed to reach target revision
-          echo "Synchronizing revision numbers..."
+          # Verify bundle exists before attempting upload
+          if [ ! -f "artifacts/proxy-${{ needs.Request_Production_Approval.outputs.version_id }}.zip" ]; then
+            echo "❌ Error: Bundle file not found at expected location"
+            ls -la artifacts/
+            exit 1
+          fi
           
-          # First upload to get current revision
+          echo "Beginning upload process..."
           IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
             -n "${{ inputs.proxy_name }}" \
-            -p artifacts/proxy-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}.zip \
+            -p "artifacts/proxy-${{ needs.Request_Production_Approval.outputs.version_id }}.zip" \
             --org "${{ secrets.APIGEE_ORG_PROD }}" \
             --token "$TOKEN")
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Initial upload failed"
+            echo "$IMPORT_OUTPUT"
+            exit 1
+          fi
           
           CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
           echo "Current revision in prod: $CURRENT_REVISION"
@@ -527,9 +553,15 @@ jobs:
             echo "Uploading to increment revision..."
             IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
               -n "${{ inputs.proxy_name }}" \
-              -p artifacts/proxy-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}.zip \
+              -p "artifacts/proxy-${{ needs.Request_Production_Approval.outputs.version_id }}.zip" \
               --org "${{ secrets.APIGEE_ORG_PROD }}" \
               --token "$TOKEN")
+            
+            if [ $? -ne 0 ]; then
+              echo "❌ Upload failed during revision sync"
+              echo "$IMPORT_OUTPUT"
+              exit 1
+            fi
             
             CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
             echo "Updated revision: $CURRENT_REVISION"
@@ -538,6 +570,14 @@ jobs:
           echo "✅ Successfully synced revision numbers"
           echo "📝 Final revision: $CURRENT_REVISION"
           echo "revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Verify Final State
+        run: |
+          echo "::group::✔️ Final Verification"
+          echo "Version ID used: ${{ needs.Request_Production_Approval.outputs.version_id }}"
+          echo "Final revision: ${{ steps.upload_and_sync.outputs.revision }}"
+          echo "✅ Build and upload process completed"
           echo "::endgroup::"
           
   Deploy_To_Production:
