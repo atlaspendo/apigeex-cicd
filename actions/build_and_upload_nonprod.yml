@@ -13,22 +13,8 @@ on:
         type: string
         default: 'apiproxy'
     secrets:
-      APIGEE_ORG:
+      secrets_yml:
         required: true
-      WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      SERVICE_ACCOUNT:
-        required: true
-    outputs:
-      latest_revision:
-        description: "The deployed revision number"
-        value: ${{ jobs.Build_And_Upload_NonProd.outputs.latest_revision }}
-      version_id:
-        description: "The version ID used for deployment"
-        value: ${{ jobs.Build_And_Upload_NonProd.outputs.version_id }}
-      revision_file:
-        description: "The file containing the revision number"
-        value: ${{ jobs.Build_And_Upload_NonProd.outputs.revision_file }}
 
 jobs:
   Build_And_Upload_NonProd:
@@ -40,10 +26,6 @@ jobs:
       WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
       SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
       SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
-    outputs:
-      latest_revision: ${{ steps.upload.outputs.revision }}
-      revision_file: ${{ steps.create-bundle.outputs.revision_file }}
-      version_id: ${{ steps.generate-version.outputs.version_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
