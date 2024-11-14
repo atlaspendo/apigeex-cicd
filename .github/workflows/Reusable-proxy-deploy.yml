@@ -758,17 +758,19 @@ jobs:
           echo "EOF" >> $GITHUB_ENV
 
       # Run Prod cleanup regardless of is_production flag if secrets exist
+      # Run prod cleanup if non-prod was successful
       - name: Prod Auth
         id: prod-auth
-        if: success() && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD != ''
+        if: success()
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+        continue-on-error: true
 
       - name: Cleanup Prod Revisions
         id: prod-cleanup
-        if: success() && steps.prod-auth.outcome == 'success'
+        if: steps.prod-auth.outcome == 'success'
         shell: bash {0}
         run: |
           set +e
@@ -787,7 +789,7 @@ jobs:
           
           # Get revisions
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/$APIGEE_PROD_ORG/apis/$PROXY_NAME/revisions")
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/$PROXY_NAME/revisions")
           
           # Convert to array and sort
           readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
@@ -815,7 +817,7 @@ jobs:
             
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://apigee.googleapis.com/v1/organizations/$APIGEE_PROD_ORG/apis/$PROXY_NAME/revisions/$REV")
+              "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/$PROXY_NAME/revisions/$REV")
             
             if [ "$STATUS_CODE" = "200" ]; then
               ((DELETED++))
@@ -841,21 +843,6 @@ jobs:
           echo "prod_summary<<EOF" >> $GITHUB_ENV
           echo -e "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-
-      - name: Add Cleanup Summary
-        if: always()
-        run: |
-          {
-            echo "============================================================"
-            echo "                 VERSION CLEANUP SUMMARY                     "
-            echo "============================================================"
-            echo ""
-            echo -e "${{ env.nonprod_summary }}"
-            if [[ "${{ steps.prod-cleanup.outcome }}" == "success" ]]; then
-              echo ""
-              echo -e "${{ env.prod_summary }}"
-            fi
-          } >> $GITHUB_STEP_SUMMARY      
 
           
   Deployment_Summary:
