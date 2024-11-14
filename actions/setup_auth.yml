@@ -1,0 +1,59 @@
+name: Setup Authentication
+
+on:
+  workflow_call:
+    secrets:
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+    outputs:
+      nonprod_token:
+        description: "Access token for non-prod environment"
+        value: ${{ jobs.Setup_Auth.outputs.nonprod_token }}
+      prod_token:
+        description: "Access token for prod environment"
+        value: ${{ jobs.Setup_Auth.outputs.prod_token }}
+
+jobs:
+  Setup_Auth:
+    runs-on: ubuntu-latest
+    outputs:
+      nonprod_token: ${{ steps.nonprod_auth.outputs.access_token }}
+      prod_token: ${{ steps.prod_auth.outputs.access_token }}
+    steps:
+      - name: Set up job
+        run: |
+          echo "::group::🔐 Setting up Authentication"
+          echo "Initializing authentication process..."
+
+      - name: Non-Prod Authentication
+        id: nonprod_auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Post Non-Prod Authentication
+        run: |
+          echo "✅ Non-prod authentication completed successfully"
+
+      - name: Prod Authentication
+        id: prod_auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Complete job
+        run: |
+          echo "✅ Authentication setup completed for all environments"
+          echo "::endgroup::"
