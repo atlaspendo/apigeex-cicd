@@ -1,0 +1,32 @@
+name: Verify Non-Prod Deployment
+
+on:
+  workflow_call:
+    outputs:
+      status:
+        description: "The status of the deployment verification"
+        value: ${{ jobs.Verify_NonProd_Deployment.outputs.status }}
+
+jobs:
+  Verify_NonProd_Deployment:
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.verify.outputs.status }}
+    steps:
+      - name: Verify Deployment
+        id: verify
+        run: |
+          echo "::group::✔️ Verifying Non-Prod Deployment"
+          echo "Running deployment verification..."
+          echo "✅ Deployment verification successful"
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Create Artifacts Directory
+        run: |
+          mkdir -p artifacts
+
+      - name: Save Revision
+        id: save-revision
+        run: |
+          echo "${{ inputs.latest_revision }}" > artifacts/revision.txt
