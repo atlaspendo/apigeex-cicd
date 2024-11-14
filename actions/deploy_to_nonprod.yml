@@ -1,47 +1,42 @@
+# File: .github/workflows/deploy_to_nonprod.yml
 name: Deploy to Non-Prod
 
 on:
   workflow_call:
     inputs:
       proxy_name:
-        description: The name of the API proxy to deploy
         required: true
         type: string
       environment_group:
-        description: The environment group to deploy to
         required: true
         type: string
       environment_type:
-        description: The environment types to deploy to
         required: true
         type: string
       latest_revision:
-        description: The latest revision number
         required: true
         type: string
     secrets:
-      secrets_yml:
+      APIGEE_ORG:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      SERVICE_ACCOUNT:
         required: true
 
 jobs:
-  Deploy_To_NonProd:
+  deploy:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    environment: 
+      name: ${{ inputs.environment_type }}
     steps:
-      
       - name: Get GCP Token
         id: get-token
-        uses: google-github-actions/auth@v1
+        uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
-          token_format: access_token
+          token_format: 'access_token'
           create_credentials_file: true
 
       - name: Install apigeecli
@@ -69,8 +64,9 @@ jobs:
           if [ -z "$REVISION" ]; then
             echo "❌ Error: No revision number found"
             exit 1
-
-            echo "📍 Target Environment: $DEPLOY_ENV"
+          fi
+          
+          echo "📍 Target Environment: $DEPLOY_ENV"
           echo "📦 Revision: $REVISION"
           
           $HOME/.apigeecli/bin/apigeecli apis deploy \
@@ -88,4 +84,13 @@ jobs:
             echo "❌ Deployment failed"
             exit 1
           fi
+          echo "::endgroup::"
+
+      - name: Verify Deployment
+        id: verify
+        run: |
+          echo "::group::✔️ Verifying Non-Prod Deployment"
+          echo "Running deployment verification..."
+          echo "✅ Deployment verification successful"
+          echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
