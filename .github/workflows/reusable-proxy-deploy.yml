@@ -66,7 +66,7 @@ permissions:
 
 jobs:
   validate_deployment_inputs:
-    uses: ./.github/workflows/validate_inputs.yml
+    uses: ./.github/workflows/actions/validate_inputs.yml
     with:
       environment_group: ${{ inputs.environment_group }}
       environment_type: ${{ inputs.environment_type }}
@@ -76,7 +76,7 @@ jobs:
   Setup_Auth:
     needs: validate_deployment_inputs
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
-    uses: ./.github/workflows/setup_auth.yml
+    uses: ./.github/workflows/actions/setup_auth.yml
     secrets:
       WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
       WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
@@ -86,14 +86,14 @@ jobs:
   Validate_API_Proxy:
     needs: [validate_deployment_inputs, Setup_Auth]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
-    uses: ./.github/workflows/validate_api_proxy.yml
+    uses: ./.github/workflows/actions/validate_api_proxy.yml
     with:
       proxy_directory: ${{ inputs.proxy_directory }}
 
   Build_And_Upload_NonProd:
     needs: [Setup_Auth, validate_deployment_inputs, Validate_API_Proxy]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
-    uses: ./.github/workflows/build_and_upload_nonprod.yml
+    uses: ./.github/workflows/actions/build_and_upload_nonprod.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       proxy_directory: ${{ inputs.proxy_directory }}
@@ -106,7 +106,7 @@ jobs:
   Deploy_To_NonProd:
     needs: [Build_And_Upload_NonProd, validate_deployment_inputs]
     if: needs.validate_deployment_inputs.outputs.can_proceed == 'true'
-    uses: ./.github/workflows/deploy_to_nonprod.yml
+    uses: ./.github/workflows/actions/deploy_to_nonprod.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       environment_group: ${{ inputs.environment_group }}
@@ -120,7 +120,7 @@ jobs:
   Request_Production_Approval:
     needs: [Build_And_Upload_NonProd]
     if: needs.Build_And_Upload_NonProd.result == 'success'
-    uses: ./.github/workflows/request_production_approval.yml
+    uses: ./.github/workflows/actions/request_production_approval.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       version_id: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
@@ -129,7 +129,7 @@ jobs:
   Build_And_Upload_Prod:
     needs: [Request_Production_Approval, Build_And_Upload_NonProd]
     if: needs.Request_Production_Approval.result == 'success'
-    uses: ./.github/workflows/build_and_upload_prod.yml
+    uses: ./.github/workflows/actions/build_and_upload_prod.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       version_id: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
@@ -141,7 +141,7 @@ jobs:
   Deploy_To_Production:
     needs: [Build_And_Upload_Prod]
     if: needs.Build_And_Upload_Prod.result == 'success'
-    uses: ./.github/workflows/deploy_to_production.yml
+    uses: ./.github/workflows/actions/deploy_to_production.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       environment_group: ${{ inputs.environment_group }}
@@ -154,7 +154,7 @@ jobs:
   Clean_Old_Versions:
     needs: [Build_And_Upload_NonProd, Build_And_Upload_Prod, Deploy_To_NonProd, Deploy_To_Production]
     if: always()
-    uses: ./.github/workflows/clean_old_versions.yml
+    uses: ./.github/workflows/actions/clean_old_versions.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
     secrets:
@@ -168,7 +168,7 @@ jobs:
   Deployment_Summary:
     needs: [validate_deployment_inputs, Setup_Auth, Build_And_Upload_NonProd, Deploy_To_NonProd, Build_And_Upload_Prod, Deploy_To_Production, Clean_Old_Versions]
     if: always()
-    uses: ./.github/workflows/deployment_summary.yml
+    uses: ./.github/workflows/actions/deployment_summary.yml
     with:
       proxy_name: ${{ inputs.proxy_name }}
       environment_group: ${{ inputs.environment_group }}
