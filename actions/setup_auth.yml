@@ -3,28 +3,20 @@ name: Setup Authentication
 on:
   workflow_call:
     secrets:
-      WORKLOAD_IDENTITY_PROVIDER:
+      secrets_yml:
         required: true
-      WORKLOAD_IDENTITY_PROVIDER_PROD:
-        required: true
-      SERVICE_ACCOUNT:
-        required: true
-      SERVICE_ACCOUNT_PROD:
-        required: true
-    outputs:
-      nonprod_token:
-        description: "Access token for non-prod environment"
-        value: ${{ jobs.Setup_Auth.outputs.nonprod_token }}
-      prod_token:
-        description: "Access token for prod environment"
-        value: ${{ jobs.Setup_Auth.outputs.prod_token }}
 
 jobs:
   Setup_Auth:
     runs-on: ubuntu-latest
-    outputs:
-      nonprod_token: ${{ steps.nonprod_auth.outputs.access_token }}
-      prod_token: ${{ steps.prod_auth.outputs.access_token }}
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    
     steps:
       - name: Set up job
         run: |
