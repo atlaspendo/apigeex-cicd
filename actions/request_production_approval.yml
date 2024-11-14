@@ -15,23 +15,22 @@ on:
         description: The version ID used for deployment
         required: true
         type: string
-    outputs:
-      revision:
-        description: "The revision number for production deployment"
-        value: ${{ jobs.Request_Production_Approval.outputs.revision }}
-      version_id:
-        description: "The version ID for production deployment"
-        value: ${{ jobs.Request_Production_Approval.outputs.version_id }}
+    secrets:
+      secrets_yml:
+        required: true
 
 jobs:
   Request_Production_Approval:
     runs-on: ubuntu-latest
-    environment:
-      name: production-approval
-    outputs:
-      revision: ${{ inputs.latest_revision }}
-      version_id: ${{ inputs.version_id }}
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
     steps:
+      
       - name: Set Deployment Status
         run: |
           echo "::group::👥 Production Deployment Request"
