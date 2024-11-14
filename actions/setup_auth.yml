@@ -1,22 +1,31 @@
+# File: .github/workflows/setup_auth.yml
 name: Setup Authentication
 
 on:
   workflow_call:
     secrets:
-      secrets_yml:
+      WORKLOAD_IDENTITY_PROVIDER:
         required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+    outputs:
+      nonprod_token:
+        description: "Non-prod authentication token"
+        value: ${{ jobs.auth.outputs.nonprod_token }}
+      prod_token:
+        description: "Prod authentication token"
+        value: ${{ jobs.auth.outputs.prod_token }}
 
 jobs:
-  Setup_Auth:
+  auth:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
-    
+    outputs:
+      nonprod_token: ${{ steps.nonprod_auth.outputs.access_token }}
+      prod_token: ${{ steps.prod_auth.outputs.access_token }}
     steps:
       - name: Set up job
         run: |
@@ -25,11 +34,11 @@ jobs:
 
       - name: Non-Prod Authentication
         id: nonprod_auth
-        uses: google-github-actions/auth@v1
+        uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
-          token_format: access_token
+          token_format: 'access_token'
           create_credentials_file: true
 
       - name: Post Non-Prod Authentication
@@ -38,11 +47,11 @@ jobs:
 
       - name: Prod Authentication
         id: prod_auth
-        uses: google-github-actions/auth@v1
+        uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: access_token
+          token_format: 'access_token'
           create_credentials_file: true
 
       - name: Complete job
