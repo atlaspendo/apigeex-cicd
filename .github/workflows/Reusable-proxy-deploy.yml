@@ -662,6 +662,8 @@ jobs:
     env:
       KEEP_COUNT: 5
       PROXY_NAME: ${{ inputs.proxy_name }}
+      APIGEE_NONPROD_ORG: ${{ secrets.APIGEE_ORG }}
+      APIGEE_PROD_ORG: ${{ secrets.APIGEE_ORG_PROD }}
     outputs:
       nonprod_kept: ${{ steps.nonprod-cleanup.outputs.kept-count }}
       nonprod_deleted: ${{ steps.nonprod-cleanup.outputs.deleted-count }}
@@ -683,8 +685,6 @@ jobs:
       - name: Cleanup Non-Prod Revisions
         id: nonprod-cleanup
         shell: bash {0}
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
         run: |
           set +e
           
@@ -702,7 +702,7 @@ jobs:
           
           # Get revisions
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions")
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_NONPROD_ORG/apis/$PROXY_NAME/revisions")
           
           # Convert to array and sort
           readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
@@ -730,7 +730,7 @@ jobs:
             
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions/$REV")
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_NONPROD_ORG/apis/$PROXY_NAME/revisions/$REV")
             
             if [ "$STATUS_CODE" = "200" ]; then
               ((DELETED++))
@@ -757,20 +757,19 @@ jobs:
           echo -e "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
+      # Run Prod cleanup regardless of is_production flag if secrets exist
       - name: Prod Auth
-        if: inputs.is_production == 'true'
         id: prod-auth
+        if: success() && secrets.WORKLOAD_IDENTITY_PROVIDER_PROD != ''
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
 
       - name: Cleanup Prod Revisions
-        if: inputs.is_production == 'true'
         id: prod-cleanup
+        if: success() && steps.prod-auth.outcome == 'success'
         shell: bash {0}
-        env:
-          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
         run: |
           set +e
           
@@ -788,7 +787,7 @@ jobs:
           
           # Get revisions
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions")
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_PROD_ORG/apis/$PROXY_NAME/revisions")
           
           # Convert to array and sort
           readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
@@ -816,7 +815,7 @@ jobs:
             
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
               -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions/$REV")
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_PROD_ORG/apis/$PROXY_NAME/revisions/$REV")
             
             if [ "$STATUS_CODE" = "200" ]; then
               ((DELETED++))
@@ -852,11 +851,11 @@ jobs:
             echo "============================================================"
             echo ""
             echo -e "${{ env.nonprod_summary }}"
-            if [[ "${{ inputs.is_production }}" == "true" ]]; then
+            if [[ "${{ steps.prod-cleanup.outcome }}" == "success" ]]; then
               echo ""
               echo -e "${{ env.prod_summary }}"
             fi
-          } >> $GITHUB_STEP_SUMMARY         
+          } >> $GITHUB_STEP_SUMMARY      
 
           
   Deployment_Summary:
