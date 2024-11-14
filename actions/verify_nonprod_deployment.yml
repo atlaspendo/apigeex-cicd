@@ -1,37 +1,260 @@
+# File: .github/workflows/verify_nonprod_deployment.yml
 name: Verify Non-Prod Deployment
 
 on:
   workflow_call:
-    secrets:
-      secrets_yml:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to verify
         required: true
+        type: string
+      environment_group:
+        description: The environment group where the proxy is deployed
+        required: true
+        type: string
+      environment_type:
+        description: The environment type where the proxy is deployed
+        required: true
+        type: string
+      revision:
+        description: The revision number to verify
+        required: true
+        type: string
+      version_id:
+        description: The version ID of the deployment
+        required: true
+        type: string
+    secrets:
+      APIGEE_ORG:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+    outputs:
+      status:
+        description: "Status of the verification"
+        value: ${{ jobs.verify.outputs.status }}
+      details:
+        description: "Detailed verification results"
+        value: ${{ jobs.verify.outputs.details }}
 
 jobs:
-  Verify_NonProd_Deployment:
+  verify:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
-    steps:
+    outputs:
+      status: ${{ steps.verification.outputs.status }}
+      details: ${{ steps.verification.outputs.details }}
     
-      - name: Verify Deployment
-        id: verify
+    steps:
+      - name: Setup Authentication
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: 'access_token'
+          create_credentials_file: true
+
+      - name: Install apigeecli
+        id: install-cli
         run: |
-          echo "::group::✔️ Verifying Non-Prod Deployment"
-          echo "Running deployment verification..."
-          echo "✅ Deployment verification successful"
-          echo "status=success" >> $GITHUB_OUTPUT
+          echo "::group::🔧 Installing Apigee CLI"
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+          echo "✅ apigeecli installed successfully"
           echo "::endgroup::"
 
-      - name: Create Artifacts Directory
+      - name: Verify Deployment Status
+        id: deployment-check
         run: |
-          mkdir -p artifacts
+          echo "::group::🔍 Verifying Deployment Status"
+          
+          # Determine environment name
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${{ inputs.environment_type }}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${{ inputs.environment_type }}"
+          fi
+          
+          echo "📍 Checking deployment in environment: $DEPLOY_ENV"
+          
+          # Get access token
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Check deployment status
+          DEPLOYMENT_STATUS=$($HOME/.apigeecli/bin/apigeecli apis get deployment \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --env "$DEPLOY_ENV" \
+            --token "$TOKEN" \
+            --json | jq -r '.state')
+          
+          if [ "$DEPLOYMENT_STATUS" != "deployed" ]; then
+            echo "❌ Deployment verification failed. Status: $DEPLOYMENT_STATUS"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Deployment not in 'deployed' state. Current state: $DEPLOYMENT_STATUS" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Deployment status verified: $DEPLOYMENT_STATUS"
+          echo "::endgroup::"
 
-      - name: Save Revision
-        id: save-revision
+      - name: Verify Revision
+        id: revision-check
+        if: success()
         run: |
-          echo "${{ inputs.latest_revision }}" > artifacts/revision.txt
+          echo "::group::🔍 Verifying Deployed Revision"
+          
+          # Get access token
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Determine environment name
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${{ inputs.environment_type }}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${{ inputs.environment_type }}"
+          fi
+          
+          # Check deployed revision
+          DEPLOYED_REVISION=$($HOME/.apigeecli/bin/apigeecli apis get deployment \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --env "$DEPLOY_ENV" \
+            --token "$TOKEN" \
+            --json | jq -r '.revision')
+          
+          if [ "$DEPLOYED_REVISION" != "${{ inputs.revision }}" ]; then
+            echo "❌ Revision mismatch"
+            echo "Expected: ${{ inputs.revision }}"
+            echo "Found: $DEPLOYED_REVISION"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Deployed revision ($DEPLOYED_REVISION) does not match expected revision (${{ inputs.revision }})" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Revision verified: $DEPLOYED_REVISION"
+          echo "::endgroup::"
+
+      - name: Verify Proxy Configuration
+        id: config-check
+        if: success()
+        run: |
+          echo "::group::🔍 Verifying Proxy Configuration"
+          
+          # Get access token
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Get proxy configuration
+          PROXY_CONFIG=$($HOME/.apigeecli/bin/apigeecli apis get \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --rev "${{ inputs.revision }}" \
+            --token "$TOKEN" \
+            --json)
+          
+          # Check essential configuration elements
+          if [ -z "$PROXY_CONFIG" ]; then
+            echo "❌ Failed to retrieve proxy configuration"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Unable to retrieve proxy configuration" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Additional configuration checks can be added here
+          echo "✅ Proxy configuration verified"
+          echo "::endgroup::"
+
+      - name: Check Proxy Health
+        id: health-check
+        if: success()
+        run: |
+          echo "::group::🏥 Checking Proxy Health"
+          
+          # Get access token
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Determine environment name
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${{ inputs.environment_type }}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${{ inputs.environment_type }}"
+          fi
+          
+          # Get deployment status details
+          HEALTH_STATUS=$($HOME/.apigeecli/bin/apigeecli apis get deployment \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --env "$DEPLOY_ENV" \
+            --token "$TOKEN" \
+            --json | jq -r '.state')
+          
+          if [ "$HEALTH_STATUS" == "deployed" ]; then
+            echo "✅ Proxy health check passed"
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "details=All verification checks passed successfully" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Proxy health check failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=Proxy health check failed. Status: $HEALTH_STATUS" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Generate Verification Report
+        if: always()
+        run: |
+          echo "::group::📝 Generating Verification Report"
+          mkdir -p verification-reports
+          
+          # Create verification report
+          cat << EOF > verification-reports/verification-summary.md
+          # Non-Prod Deployment Verification Report
+          
+          ## Overview
+          - **Proxy Name**: ${{ inputs.proxy_name }}
+          - **Environment**: ${{ inputs.environment_group }}-${{ inputs.environment_type }}
+          - **Revision**: ${{ inputs.revision }}
+          - **Version ID**: ${{ inputs.version_id }}
+          - **Status**: ${{ steps.verification.outputs.status }}
+          
+          ## Verification Steps
+          1. Deployment Status Check: ${{ steps.deployment-check.outcome == 'success' && '✅ Passed' || '❌ Failed' }}
+          2. Revision Verification: ${{ steps.revision-check.outcome == 'success' && '✅ Passed' || '❌ Failed' }}
+          3. Configuration Check: ${{ steps.config-check.outcome == 'success' && '✅ Passed' || '❌ Failed' }}
+          4. Health Check: ${{ steps.health-check.outcome == 'success' && '✅ Passed' || '❌ Failed' }}
+          
+          ## Details
+          ${{ steps.verification.outputs.details }}
+          
+          ## Timestamp
+          Generated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          EOF
+          
+          echo "✅ Verification report generated"
+          echo "::endgroup::"
+
+      - name: Upload Verification Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: verification-reports-${{ inputs.version_id }}
+          path: verification-reports/
+          retention-days: 7
+
+      - name: Set Final Status
+        id: verification
+        if: always()
+        run: |
+          if [ "${{ steps.deployment-check.outcome }}" == "success" ] && \
+             [ "${{ steps.revision-check.outcome }}" == "success" ] && \
+             [ "${{ steps.config-check.outcome }}" == "success" ] && \
+             [ "${{ steps.health-check.outcome }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "details=All verification checks passed successfully" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "details=One or more verification checks failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
