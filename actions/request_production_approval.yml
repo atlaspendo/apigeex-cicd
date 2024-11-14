@@ -1,43 +1,39 @@
+# File: .github/workflows/request_production_approval.yml
 name: Request Production Approval
 
 on:
   workflow_call:
     inputs:
       proxy_name:
-        description: The name of the API proxy to deploy
-        required: true
-        type: string
-      latest_revision:
-        description: The latest revision number
         required: true
         type: string
       version_id:
-        description: The version ID used for deployment
         required: true
         type: string
-    secrets:
-      secrets_yml:
+      revision:
         required: true
+        type: string
+    outputs:
+      revision:
+        description: "The approved revision number"
+        value: ${{ inputs.revision }}
+      version_id:
+        description: "The approved version ID"
+        value: ${{ inputs.version_id }}
 
 jobs:
-  Request_Production_Approval:
+  request_approval:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    environment:
+      name: production-approval
     steps:
-      
       - name: Set Deployment Status
         run: |
           echo "::group::👥 Production Deployment Request"
           echo "✅ Non-prod deployment successful"
           echo "⏳ Awaiting production approval"
           echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ inputs.latest_revision }}"
+          echo "📝 Revision: ${{ inputs.revision }}"
           echo "🏷️ Version ID: ${{ inputs.version_id }}"
           echo "::endgroup::"
 
