@@ -1,0 +1,156 @@
+name: Apigee Proxy Deployment [Main Workflow]
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      proxy_directory:
+        description: Working directory to zip up as your proxy bundle
+        required: false
+        type: string
+        default: 'apiproxy'
+      environment_group:
+        description: The environment group to deploy to
+        required: true
+        type: string
+      environment_type:
+        description: The environment types to deploy to
+        required: true
+        type: string
+      is_production:
+        description: Is this a production deployment?
+        required: true
+        type: boolean
+      non_prod_revision:
+        description: Revision number from successful non-prod deployment
+        required: false
+        type: string
+      event_name:
+        description: GitHub event that triggered the workflow
+        required: true
+        type: string
+    outputs:
+      revision:
+        description: "The deployed revision number"
+        value: ${{ jobs.nonprod_deployment.outputs.revision }}
+      version_id:
+        description: "The version ID used for deployment"
+        value: ${{ jobs.nonprod_deployment.outputs.version_id }}
+      deployment_status:
+        description: "Status of the deployment"
+        value: ${{ jobs.validate_inputs.outputs.deployment_status }}
+    secrets:
+      APIGEE_ORG:
+        required: true
+      APIGEE_ORG_PROD:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  deployments: write
+  issues: write
+  checks: write
+
+jobs:
+  validate_inputs:
+    uses: ./.github/workflows/validate_inputs.yml
+    with:
+      environment_group: ${{ inputs.environment_group }}
+      environment_type: ${{ inputs.environment_type }}
+      is_production: ${{ inputs.is_production }}
+      non_prod_revision: ${{ inputs.non_prod_revision }}
+
+  setup_auth:
+    needs: validate_inputs
+    if: needs.validate_inputs.outputs.can_proceed == 'true'
+    uses: ./.github/workflows/setup_auth.yml
+    secrets:
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+
+  validate_proxy:
+    needs: [validate_inputs, setup_auth]
+    if: needs.validate_inputs.outputs.can_proceed == 'true'
+    uses: ./.github/workflows/validate_api_proxy.yml
+    with:
+      proxy_directory: ${{ inputs.proxy_directory }}
+
+  nonprod_deployment:
+    needs: [validate_proxy]
+    uses: ./.github/workflows/build_and_deploy_nonprod.yml
+    with:
+      proxy_name: ${{ inputs.proxy_name }}
+      proxy_directory: ${{ inputs.proxy_directory }}
+      environment_group: ${{ inputs.environment_group }}
+      environment_type: ${{ inputs.environment_type }}
+      is_production: ${{ inputs.is_production }}
+    secrets:
+      APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+      SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+
+  prod_approval:
+    needs: [nonprod_deployment]
+    if: needs.nonprod_deployment.outputs.status == 'success'
+    uses: ./.github/workflows/request_production_approval.yml
+    with:
+      proxy_name: ${{ inputs.proxy_name }}
+      version_id: ${{ needs.nonprod_deployment.outputs.version_id }}
+      revision: ${{ needs.nonprod_deployment.outputs.revision }}
+
+  prod_deployment:
+    needs: [prod_approval]
+    if: needs.prod_approval.result == 'success'
+    uses: ./.github/workflows/build_and_deploy_prod.yml
+    with:
+      proxy_name: ${{ inputs.proxy_name }}
+      environment_group: ${{ inputs.environment_group }}
+      version_id: ${{ needs.nonprod_deployment.outputs.version_id }}
+      revision: ${{ needs.nonprod_deployment.outputs.revision }}
+    secrets:
+      APIGEE_ORG_PROD: ${{ secrets.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+
+  cleanup:
+    needs: [nonprod_deployment, prod_deployment]
+    if: always()
+    uses: ./.github/workflows/clean_old_versions.yml
+    with:
+      proxy_name: ${{ inputs.proxy_name }}
+    secrets:
+      APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+
+  deployment_summary:
+    needs: [validate_inputs, nonprod_deployment, prod_deployment, cleanup]
+    if: always()
+    uses: ./.github/workflows/deployment_summary.yml
+    with:
+      proxy_name: ${{ inputs.proxy_name }}
+      environment_group: ${{ inputs.environment_group }}
+      environment_type: ${{ inputs.environment_type }}
+      is_production: ${{ inputs.is_production }}
+      nonprod_status: ${{ needs.nonprod_deployment.result }}
+      nonprod_revision: ${{ needs.nonprod_deployment.outputs.revision }}
+      prod_status: ${{ needs.prod_deployment.result }}
+      prod_revision: ${{ needs.prod_deployment.outputs.revision }}
+      version_id: ${{ needs.nonprod_deployment.outputs.version_id }}
