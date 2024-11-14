@@ -1,0 +1,159 @@
+name: Build and Upload Non-Prod
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      proxy_directory:
+        description: Working directory to zip up as your proxy bundle
+        required: false
+        type: string
+        default: 'apiproxy'
+    secrets:
+      APIGEE_ORG:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+    outputs:
+      latest_revision:
+        description: "The deployed revision number"
+        value: ${{ jobs.Build_And_Upload_NonProd.outputs.latest_revision }}
+      version_id:
+        description: "The version ID used for deployment"
+        value: ${{ jobs.Build_And_Upload_NonProd.outputs.version_id }}
+      revision_file:
+        description: "The file containing the revision number"
+        value: ${{ jobs.Build_And_Upload_NonProd.outputs.revision_file }}
+
+jobs:
+  Build_And_Upload_NonProd:
+    runs-on: ubuntu-latest
+    outputs:
+      latest_revision: ${{ steps.upload.outputs.revision }}
+      revision_file: ${{ steps.create-bundle.outputs.revision_file }}
+      version_id: ${{ steps.generate-version.outputs.version_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            echo "::group::🔧 Installing Apigee CLI"
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
+
+      - name: Generate Version ID
+        id: generate-version
+        run: |
+          TAG=$(git rev-parse --short "$GITHUB_SHA")-$(date +%Y%m%d%H%M%S)
+          echo "version_id=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create API bundle
+        id: create-bundle
+        run: |
+          echo "::group::📦 Creating API Bundle"
+          mkdir -p artifacts
+          
+          create_bundle() {
+            local source_dir="$1"
+            echo "Creating bundle from: $source_dir"
+            mkdir -p temp_bundle
+            cp -r "$source_dir" temp_bundle/apiproxy
+            cd temp_bundle
+            zip -r ../proxy-${{ steps.generate-version.outputs.version_id }}.zip apiproxy
+            cd ..
+            cp proxy-${{ steps.generate-version.outputs.version_id }}.zip artifacts/
+            echo "✅ Bundle created and saved to artifacts"
+            echo "📝 Bundle contents:"
+            unzip -l proxy-${{ steps.generate-version.outputs.version_id }}.zip
+            rm -rf temp_bundle
+            echo "revision_file=artifacts/revision.txt" >> $GITHUB_OUTPUT
+          }
+          
+          if [ -d "${{ inputs.proxy_directory }}" ]; then
+            create_bundle "${{ inputs.proxy_directory }}"
+          elif [ -d "src/${{ inputs.proxy_directory }}" ]; then
+            create_bundle "src/${{ inputs.proxy_directory }}"
+          else
+            echo "❌ Error: Could not find apiproxy directory"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Get GCP Token
+        id: get-token
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Upload and Get Revision
+        id: upload
+        run: |
+          echo "::group::📤 Uploading to Non-Prod"
+          echo "Organization: ${{ secrets.APIGEE_ORG }}"
+          echo "Proxy name: ${{ inputs.proxy_name }}"
+          
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Add pre-upload wait
+          echo "Waiting for token validation..."
+          sleep 5
+          
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "${{ inputs.proxy_name }}" \
+            -p artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --token "$TOKEN")
+          
+          echo "Import output: $IMPORT_OUTPUT"
+          
+          # Add post-upload wait
+          echo "Waiting for import to process..."
+          sleep 5
+          
+          NEW_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          if [ -z "$NEW_REVISION" ]; then
+            echo "❌ Failed to get revision number"
+            exit 1
+          fi
+          
+          # Save revision number for future use
+          echo "$NEW_REVISION" > artifacts/revision.txt
+          echo "✅ Successfully uploaded revision: $NEW_REVISION"
+          echo "revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Verify Upload
+        if: success()
+        run: |
+          echo "::group::✔️ Verifying Upload"
+          echo "Revision file contents:"
+          cat artifacts/revision.txt
+          echo "Proxy bundle exists: $(test -f artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip && echo 'Yes' || echo 'No')"
+          echo "✅ Upload verification complete"
+          echo "::endgroup::"
+
+      - name: Save Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: proxy-artifacts-${{ steps.generate-version.outputs.version_id }}
+          path: |
+            artifacts/proxy-${{ steps.generate-version.outputs.version_id }}.zip
+            artifacts/revision.txt
+          retention-days: 1

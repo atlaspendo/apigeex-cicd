@@ -1,0 +1,250 @@
+name: Clean Old Versions
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      is_production:
+        description: Is this a production deployment?
+        required: true
+        type: boolean
+    secrets:
+      APIGEE_ORG:
+        required: true
+      APIGEE_ORG_PROD:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+    outputs:
+      nonprod_kept:
+        description: "Number of non-prod revisions kept"
+        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_kept }}
+      nonprod_deleted:
+        description: "Number of non-prod revisions deleted"
+        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_deleted }}
+      nonprod_failed:
+        description: "Number of non-prod revisions failed to delete"
+        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_failed }}
+      prod_kept:
+        description: "Number of prod revisions kept"
+        value: ${{ jobs.Clean_Old_Versions.outputs.prod_kept }}
+      prod_deleted:
+        description: "Number of prod revisions deleted"
+        value: ${{ jobs.Clean_Old_Versions.outputs.prod_deleted }}
+      prod_failed:
+        description: "Number of prod revisions failed to delete"
+        value: ${{ jobs.Clean_Old_Versions.outputs.prod_failed }}
+
+jobs:
+  Clean_Old_Versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      KEEP_COUNT: 5
+      PROXY_NAME: ${{ inputs.proxy_name }}
+    outputs:
+      nonprod_kept: ${{ steps.nonprod-cleanup.outputs.kept-count }}
+      nonprod_deleted: ${{ steps.nonprod-cleanup.outputs.deleted-count }}
+      nonprod_failed: ${{ steps.nonprod-cleanup.outputs.failed-count }}
+      prod_kept: ${{ steps.prod-cleanup.outputs.kept-count }}
+      prod_deleted: ${{ steps.prod-cleanup.outputs.deleted-count }}
+      prod_failed: ${{ steps.prod-cleanup.outputs.failed-count }}
+    steps:
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Non-Prod Auth
+        id: nonprod-auth
+        uses:uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
+      - name: Cleanup Non-Prod Revisions
+        id: nonprod-cleanup
+        shell: bash {0}
+        env:
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG }}
+        run: |
+          set +e
+          
+          # Get access token
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access token"
+            echo "kept-count=0" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "Starting deletion of older revisions for proxy: $PROXY_NAME in Non-Prod"
+          
+          # Get revisions
+          REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions")
+          
+          # Convert to array and sort
+          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
+          TOTAL_REVISIONS=${#REVISIONS[@]}
+          
+          echo "Found $TOTAL_REVISIONS revisions"
+          
+          # Initialize counters
+          DELETED=0
+          FAILED=0
+          
+          if [ "$TOTAL_REVISIONS" -le "$KEEP_COUNT" ]; then
+            echo "kept-count=$TOTAL_REVISIONS" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
+          
+          # Process revisions to delete
+          for ((i=0; i<DELETE_COUNT; i++)); do
+            REV="${REVISIONS[$i]}"
+            echo "Attempting to delete revision $REV"
+            
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions/$REV")
+            
+            if [ "$STATUS_CODE" = "200" ]; then
+              ((DELETED++))
+              echo "✅ Successfully deleted revision $REV"
+            else
+              ((FAILED++))
+              echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
+            fi
+          done
+          
+          # Set outputs
+          echo "kept-count=$KEEP_COUNT" >> $GITHUB_OUTPUT
+          echo "deleted-count=$DELETED" >> $GITHUB_OUTPUT
+          echo "failed-count=$FAILED" >> $GITHUB_OUTPUT
+          
+          # Generate summary
+          SUMMARY="Non-Prod Cleanup Summary:\n"
+          SUMMARY+="- Total revisions: $TOTAL_REVISIONS\n"
+          SUMMARY+="- Kept: $KEEP_COUNT\n"
+          SUMMARY+="- Deleted: $DELETED\n"
+          SUMMARY+="- Failed: $FAILED\n"
+          
+          echo "nonprod_summary<<EOF" >> $GITHUB_ENV
+          echo -e "$SUMMARY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Prod Auth
+        if: inputs.is_production == 'true'
+        id: prod-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+
+      - name: Cleanup Prod Revisions
+        if: inputs.is_production == 'true'
+        id: prod-cleanup
+        shell: bash {0}
+        env:
+          APIGEE_ORG: ${{ secrets.APIGEE_ORG_PROD }}
+        run: |
+          set +e
+          
+          # Get access token
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access token"
+            echo "kept-count=0" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "Starting deletion of older revisions for proxy: $PROXY_NAME in Prod"
+          
+          # Get revisions
+          REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions")
+          
+          # Convert to array and sort
+          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
+          TOTAL_REVISIONS=${#REVISIONS[@]}
+          
+          echo "Found $TOTAL_REVISIONS revisions"
+          
+          # Initialize counters
+          DELETED=0
+          FAILED=0
+          
+          if [ "$TOTAL_REVISIONS" -le "$KEEP_COUNT" ]; then
+            echo "kept-count=$TOTAL_REVISIONS" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
+          
+          # Process revisions to delete
+          for ((i=0; i<DELETE_COUNT; i++)); do
+            REV="${REVISIONS[$i]}"
+            echo "Attempting to delete revision $REV"
+            
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://apigee.googleapis.com/v1/organizations/$APIGEE_ORG/apis/$PROXY_NAME/revisions/$REV")
+            
+            if [ "$STATUS_CODE" = "200" ]; then
+              ((DELETED++))
+              echo "✅ Successfully deleted revision $REV"
+            else
+              ((FAILED++))
+              echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
+            fi
+          done
+          
+          # Set outputs
+          echo "kept-count=$KEEP_COUNT" >> $GITHUB_OUTPUT
+          echo "deleted-count=$DELETED" >> $GITHUB_OUTPUT
+          echo "failed-count=$FAILED" >> $GITHUB_OUTPUT
+          
+          # Generate summary
+          SUMMARY="Production Cleanup Summary:\n"
+          SUMMARY+="- Total revisions: $TOTAL_REVISIONS\n"
+          SUMMARY+="- Kept: $KEEP_COUNT\n"
+          SUMMARY+="- Deleted: $DELETED\n"
+          SUMMARY+="- Failed: $FAILED\n"
+          
+          echo "prod_summary<<EOF" >> $GITHUB_ENV
+          echo -e "$SUMMARY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Add Cleanup Summary
+        if: always()
+        run: |
+          {
+            echo "============================================================"
+            echo "                 VERSION CLEANUP SUMMARY                     "
+            echo "============================================================"
+            echo ""
+            echo -e "${{ env.nonprod_summary }}"
+            if [[ "${{ inputs.is_production }}" == "true" ]]; then
+              echo ""
+              echo -e "${{ env.prod_summary }}"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
