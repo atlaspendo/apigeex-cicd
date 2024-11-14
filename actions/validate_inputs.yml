@@ -1,40 +1,43 @@
-name: Validate Inputs
+name: Validate Deployment Inputs
 
 on:
   workflow_call:
     inputs:
-      proxy_name:
-        description: The name of the API proxy to deploy
-        required: true
-        type: string
       environment_group:
-        description: The environment group to deploy to
         required: true
         type: string
       environment_type:
-        description: The environment types to deploy to
         required: true
         type: string
       is_production:
-        description: Is this a production deployment?
         required: true
         type: boolean
-    secrets:
-      secrets_yml:
-        required: true
+      non_prod_revision:
+        required: false
+        type: string
+    outputs:
+      can_proceed:
+        description: "Whether the deployment can proceed"
+        value: ${{ jobs.validate.outputs.can_proceed }}
+      deployment_type:
+        description: "Type of deployment"
+        value: ${{ jobs.validate.outputs.deployment_type }}
+      deployment_status:
+        description: "Status of the validation"
+        value: ${{ jobs.validate.outputs.deployment_status }}
+      environment:
+        description: "Target environment"
+        value: ${{ jobs.validate.outputs.environment }}
 
 jobs:
-  validate_deployment_inputs:
+  validate:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    outputs:
+      can_proceed: ${{ steps.validate.outputs.can_proceed }}
+      deployment_type: ${{ steps.validate.outputs.deployment_type }}
+      deployment_status: ${{ steps.validate.outputs.deployment_status }}
+      environment: ${{ steps.validate.outputs.environment }}
     steps:
-    
       - name: Validate Environment Configuration
         id: validate
         run: |
