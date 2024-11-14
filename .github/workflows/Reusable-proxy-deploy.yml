@@ -791,28 +791,56 @@ jobs:
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/$PROXY_NAME/revisions")
           
-          # Convert to array and sort
-          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
+          # Get currently deployed revision
+          DEPLOYED_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/environments/prod/deployments")
+          
+          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg PROXY "$PROXY_NAME" '.deployments[] | select(.apiProxy==$PROXY) | .revision // empty')
+          echo "Currently deployed revision: ${DEPLOYED_REV:-None}"
+          
+          # Convert to array and sort in reverse order (newest first)
+          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -nr)
           TOTAL_REVISIONS=${#REVISIONS[@]}
           
           echo "Found $TOTAL_REVISIONS revisions"
+          echo "Keeping $KEEP_COUNT most recent revisions and deployed revision"
           
-          # Initialize counters
+          # Initialize counters and arrays
           DELETED=0
           FAILED=0
+          KEPT=0
+          declare -a REVISIONS_TO_KEEP
+          declare -a REVISIONS_TO_DELETE
           
-          if [ "$TOTAL_REVISIONS" -le "$KEEP_COUNT" ]; then
-            echo "kept-count=$TOTAL_REVISIONS" >> $GITHUB_OUTPUT
-            echo "deleted-count=0" >> $GITHUB_OUTPUT
-            echo "failed-count=0" >> $GITHUB_OUTPUT
-            exit 0
+          # First, ensure we keep the deployed revision if it exists
+          if [ ! -z "$DEPLOYED_REV" ]; then
+            REVISIONS_TO_KEEP+=("$DEPLOYED_REV")
+            ((KEPT++))
+            echo "Keeping deployed revision: $DEPLOYED_REV"
           fi
           
-          DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_COUNT))
+          # Then keep the most recent revisions
+          for REV in "${REVISIONS[@]}"; do
+            if [ $KEPT -lt $KEEP_COUNT ]; then
+              # Only add to keep list if it's not already there (not the deployed revision)
+              if [[ ! " ${REVISIONS_TO_KEEP[@]} " =~ " ${REV} " ]]; then
+                REVISIONS_TO_KEEP+=("$REV")
+                ((KEPT++))
+                echo "Keeping recent revision: $REV"
+              fi
+            else
+              # Only add to delete list if it's not in keep list
+              if [[ ! " ${REVISIONS_TO_KEEP[@]} " =~ " ${REV} " ]]; then
+                REVISIONS_TO_DELETE+=("$REV")
+              fi
+            fi
+          done
           
-          # Process revisions to delete
-          for ((i=0; i<DELETE_COUNT; i++)); do
-            REV="${REVISIONS[$i]}"
+          echo "Revisions to keep: ${REVISIONS_TO_KEEP[*]}"
+          echo "Revisions to delete: ${REVISIONS_TO_DELETE[*]}"
+          
+          # Delete old revisions
+          for REV in "${REVISIONS_TO_DELETE[@]}"; do
             echo "Attempting to delete revision $REV"
             
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
@@ -829,16 +857,17 @@ jobs:
           done
           
           # Set outputs
-          echo "kept-count=$KEEP_COUNT" >> $GITHUB_OUTPUT
+          echo "kept-count=${#REVISIONS_TO_KEEP[@]}" >> $GITHUB_OUTPUT
           echo "deleted-count=$DELETED" >> $GITHUB_OUTPUT
           echo "failed-count=$FAILED" >> $GITHUB_OUTPUT
           
           # Generate summary
           SUMMARY="Production Cleanup Summary:\n"
-          SUMMARY+="- Total revisions: $TOTAL_REVISIONS\n"
-          SUMMARY+="- Kept: $KEEP_COUNT\n"
-          SUMMARY+="- Deleted: $DELETED\n"
-          SUMMARY+="- Failed: $FAILED\n"
+          SUMMARY+="- Total revisions before cleanup: $TOTAL_REVISIONS\n"
+          SUMMARY+="- Currently deployed revision: ${DEPLOYED_REV:-None}\n"
+          SUMMARY+="- Versions kept ($KEPT): ${REVISIONS_TO_KEEP[*]}\n"
+          SUMMARY+="- Versions deleted ($DELETED): ${REVISIONS_TO_DELETE[*]}\n"
+          SUMMARY+="- Failed deletions ($FAILED)\n"
           
           echo "prod_summary<<EOF" >> $GITHUB_ENV
           echo -e "$SUMMARY" >> $GITHUB_ENV
