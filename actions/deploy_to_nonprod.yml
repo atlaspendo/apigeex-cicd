@@ -20,19 +20,21 @@ on:
         required: true
         type: string
     secrets:
-      APIGEE_ORG:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      SERVICE_ACCOUNT:
+      secrets_yml:
         required: true
 
 jobs:
   Deploy_To_NonProd:
     runs-on: ubuntu-latest
-    environment: 
-      name: ${{ inputs.environment_type }}
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
     steps:
+      
       - name: Get GCP Token
         id: get-token
         uses: google-github-actions/auth@v1
