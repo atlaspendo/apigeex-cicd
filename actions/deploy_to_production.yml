@@ -16,17 +16,21 @@ on:
         required: true
         type: string
     secrets:
-      APIGEE_ORG_PROD:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER_PROD:
-        required: true
-      SERVICE_ACCOUNT_PROD:
+      secrets_yml:
         required: true
 
 jobs:
   Deploy_To_Production:
     runs-on: ubuntu-latest
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
     steps:
+     
       - name: Install apigeecli
         id: install-apigeecli
         uses: nick-invision/retry@v2
