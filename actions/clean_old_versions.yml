@@ -12,55 +12,21 @@ on:
         required: true
         type: boolean
     secrets:
-      APIGEE_ORG:
+      secrets_yml:
         required: true
-      APIGEE_ORG_PROD:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER_PROD:
-        required: true
-      SERVICE_ACCOUNT:
-        required: true
-      SERVICE_ACCOUNT_PROD:
-        required: true
-    outputs:
-      nonprod_kept:
-        description: "Number of non-prod revisions kept"
-        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_kept }}
-      nonprod_deleted:
-        description: "Number of non-prod revisions deleted"
-        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_deleted }}
-      nonprod_failed:
-        description: "Number of non-prod revisions failed to delete"
-        value: ${{ jobs.Clean_Old_Versions.outputs.nonprod_failed }}
-      prod_kept:
-        description: "Number of prod revisions kept"
-        value: ${{ jobs.Clean_Old_Versions.outputs.prod_kept }}
-      prod_deleted:
-        description: "Number of prod revisions deleted"
-        value: ${{ jobs.Clean_Old_Versions.outputs.prod_deleted }}
-      prod_failed:
-        description: "Number of prod revisions failed to delete"
-        value: ${{ jobs.Clean_Old_Versions.outputs.prod_failed }}
 
 jobs:
   Clean_Old_Versions:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     env:
-      KEEP_COUNT: 5
-      PROXY_NAME: ${{ inputs.proxy_name }}
-    outputs:
-      nonprod_kept: ${{ steps.nonprod-cleanup.outputs.kept-count }}
-      nonprod_deleted: ${{ steps.nonprod-cleanup.outputs.deleted-count }}
-      nonprod_failed: ${{ steps.nonprod-cleanup.outputs.failed-count }}
-      prod_kept: ${{ steps.prod-cleanup.outputs.kept-count }}
-      prod_deleted: ${{ steps.prod-cleanup.outputs.deleted-count }}
-      prod_failed: ${{ steps.prod-cleanup.outputs.failed-count }}
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
     steps:
+      
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
