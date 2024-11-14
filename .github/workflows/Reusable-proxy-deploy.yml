@@ -702,62 +702,82 @@ jobs:
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions")
           
-          # Convert to array and sort
-          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
+          # Check if revisions request was successful
+          if [ $? -ne 0 ] || [ -z "$REVISIONS_JSON" ]; then
+            echo "❌ Failed to fetch revisions"
+            echo "kept-count=0" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Extract and sort revisions
+          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -nr)
           TOTAL_REVISIONS=${#REVISIONS[@]}
           
           echo "Found $TOTAL_REVISIONS revisions"
           
           # Get deployed revision
+          ENV="${{ inputs.environment_type }}"
           DEPLOYED_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/deployments")
-          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg ENV "${{ inputs.environment_type }}" '.deployments[] | select(.environment==$ENV) | .revision')
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/environments/$ENV/deployments")
           
-          echo "Currently deployed revision: $DEPLOYED_REV"
+          # Extract deployed revision for our proxy
+          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg PROXY "${{ inputs.proxy_name }}" '.deployments[] | select(.apiProxy==$PROXY) | .revision')
           
-          # Initialize counters
+          echo "Currently deployed revision: ${DEPLOYED_REV:-None}"
+          
+          # Initialize counters and arrays
           DELETED=0
           FAILED=0
           KEPT=0
-          SUMMARY="Non-Prod Cleanup Summary:\n"
+          KEPT_REVS=()
+          DELETED_REVS=()
+          FAILED_REVS=()
           
-          if [ "$TOTAL_REVISIONS" -le "$KEEP_VERSIONS" ]; then
-            echo "Keeping all revisions as total count ($TOTAL_REVISIONS) is less than or equal to keep count ($KEEP_VERSIONS)"
-            KEPT=$TOTAL_REVISIONS
-          else
-            DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_VERSIONS))
-            KEPT=$KEEP_VERSIONS
-            
-            # Process revisions to delete
-            for ((i=0; i<DELETE_COUNT; i++)); do
-              REV="${REVISIONS[$i]}"
-              
-              # Skip if this is the deployed revision
-              if [ "$REV" = "$DEPLOYED_REV" ]; then
-                continue
-              fi
-              
-              echo "Attempting to delete revision $REV"
-              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
-              
-              if [ "$STATUS_CODE" = "200" ]; then
-                ((DELETED++))
-                echo "✅ Successfully deleted revision $REV"
-              else
-                ((FAILED++))
-                echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
-              fi
-            done
+          # Always keep the deployed revision if it exists
+          if [ ! -z "$DEPLOYED_REV" ]; then
+            KEPT_REVS+=("$DEPLOYED_REV")
+            ((KEPT++))
           fi
           
+          # Process revisions
+          for REV in "${REVISIONS[@]}"; do
+            # Skip if we've kept enough versions
+            if [ $KEPT -ge $KEEP_VERSIONS ]; then
+              # Don't delete deployed revision
+              if [ "$REV" != "$DEPLOYED_REV" ]; then
+                echo "Attempting to delete revision $REV"
+                STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+                  -H "Authorization: Bearer $ACCESS_TOKEN" \
+                  "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
+                
+                if [ "$STATUS_CODE" = "200" ]; then
+                  ((DELETED++))
+                  DELETED_REVS+=("$REV")
+                  echo "✅ Successfully deleted revision $REV"
+                else
+                  ((FAILED++))
+                  FAILED_REVS+=("$REV")
+                  echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
+                fi
+              fi
+            else
+              # Keep this revision
+              if [ "$REV" != "$DEPLOYED_REV" ]; then
+                KEPT_REVS+=("$REV")
+                ((KEPT++))
+              fi
+            fi
+          done
+          
           # Generate summary
+          SUMMARY="Non-Prod Cleanup Summary:\n"
           SUMMARY+="- Total revisions before cleanup: $TOTAL_REVISIONS\n"
-          SUMMARY+="- Currently deployed revision: $DEPLOYED_REV\n"
-          SUMMARY+="- Versions kept: $KEPT\n"
-          SUMMARY+="- Versions deleted: $DELETED\n"
-          SUMMARY+="- Failed deletions: $FAILED\n"
+          SUMMARY+="- Currently deployed revision: ${DEPLOYED_REV:-None}\n"
+          SUMMARY+="- Versions kept (${#KEPT_REVS[@]}): ${KEPT_REVS[*]}\n"
+          SUMMARY+="- Versions deleted (${#DELETED_REVS[@]}): ${DELETED_REVS[*]}\n"
+          SUMMARY+="- Failed deletions (${#FAILED_REVS[@]}): ${FAILED_REVS[*]}\n"
           
           # Set outputs
           echo "kept-count=$KEPT" >> $GITHUB_OUTPUT
@@ -802,62 +822,82 @@ jobs:
           REVISIONS_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
             "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/${{ inputs.proxy_name }}/revisions")
           
-          # Convert to array and sort
-          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -n)
+          # Check if revisions request was successful
+          if [ $? -ne 0 ] || [ -z "$REVISIONS_JSON" ]; then
+            echo "❌ Failed to fetch revisions"
+            echo "kept-count=0" >> $GITHUB_OUTPUT
+            echo "deleted-count=0" >> $GITHUB_OUTPUT
+            echo "failed-count=0" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Extract and sort revisions
+          readarray -t REVISIONS < <(echo "$REVISIONS_JSON" | jq -r '.[]' | sort -nr)
           TOTAL_REVISIONS=${#REVISIONS[@]}
           
           echo "Found $TOTAL_REVISIONS revisions"
           
-          # Get deployed revision
+          # Get deployed revisions from all environments
+          ENV="prod"
           DEPLOYED_JSON=$(curl -s -X GET -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/${{ inputs.proxy_name }}/deployments")
-          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r '.deployments[] | select(.environment=="prod") | .revision')
+            "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/environments/$ENV/deployments")
           
-          echo "Currently deployed revision: $DEPLOYED_REV"
+          # Extract deployed revision for our proxy
+          DEPLOYED_REV=$(echo "$DEPLOYED_JSON" | jq -r --arg PROXY "${{ inputs.proxy_name }}" '.deployments[] | select(.apiProxy==$PROXY) | .revision')
           
-          # Initialize counters
+          echo "Currently deployed revision: ${DEPLOYED_REV:-None}"
+          
+          # Initialize counters and arrays
           DELETED=0
           FAILED=0
           KEPT=0
-          SUMMARY="Prod Cleanup Summary:\n"
+          KEPT_REVS=()
+          DELETED_REVS=()
+          FAILED_REVS=()
           
-          if [ "$TOTAL_REVISIONS" -le "$KEEP_VERSIONS" ]; then
-            echo "Keeping all revisions as total count ($TOTAL_REVISIONS) is less than or equal to keep count ($KEEP_VERSIONS)"
-            KEPT=$TOTAL_REVISIONS
-          else
-            DELETE_COUNT=$((TOTAL_REVISIONS - KEEP_VERSIONS))
-            KEPT=$KEEP_VERSIONS
-            
-            # Process revisions to delete
-            for ((i=0; i<DELETE_COUNT; i++)); do
-              REV="${REVISIONS[$i]}"
-              
-              # Skip if this is the deployed revision
-              if [ "$REV" = "$DEPLOYED_REV" ]; then
-                continue
-              fi
-              
-              echo "Attempting to delete revision $REV"
-              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                -H "Authorization: Bearer $ACCESS_TOKEN" \
-                "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
-              
-              if [ "$STATUS_CODE" = "200" ]; then
-                ((DELETED++))
-                echo "✅ Successfully deleted revision $REV"
-              else
-                ((FAILED++))
-                echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
-              fi
-            done
+          # Always keep the deployed revision if it exists
+          if [ ! -z "$DEPLOYED_REV" ]; then
+            KEPT_REVS+=("$DEPLOYED_REV")
+            ((KEPT++))
           fi
           
+          # Process revisions
+          for REV in "${REVISIONS[@]}"; do
+            # Skip if we've kept enough versions
+            if [ $KEPT -ge $KEEP_VERSIONS ]; then
+              # Don't delete deployed revision
+              if [ "$REV" != "$DEPLOYED_REV" ]; then
+                echo "Attempting to delete revision $REV"
+                STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+                  -H "Authorization: Bearer $ACCESS_TOKEN" \
+                  "https://apigee.googleapis.com/v1/organizations/${{ secrets.APIGEE_ORG_PROD }}/apis/${{ inputs.proxy_name }}/revisions/$REV")
+                
+                if [ "$STATUS_CODE" = "200" ]; then
+                  ((DELETED++))
+                  DELETED_REVS+=("$REV")
+                  echo "✅ Successfully deleted revision $REV"
+                else
+                  ((FAILED++))
+                  FAILED_REVS+=("$REV")
+                  echo "❌ Failed to delete revision $REV (Status: $STATUS_CODE)"
+                fi
+              fi
+            else
+              # Keep this revision
+              if [ "$REV" != "$DEPLOYED_REV" ]; then
+                KEPT_REVS+=("$REV")
+                ((KEPT++))
+              fi
+            fi
+          done
+          
           # Generate summary
+          SUMMARY="Production Cleanup Summary:\n"
           SUMMARY+="- Total revisions before cleanup: $TOTAL_REVISIONS\n"
-          SUMMARY+="- Currently deployed revision: $DEPLOYED_REV\n"
-          SUMMARY+="- Versions kept: $KEPT\n"
-          SUMMARY+="- Versions deleted: $DELETED\n"
-          SUMMARY+="- Failed deletions: $FAILED\n"
+          SUMMARY+="- Currently deployed revision: ${DEPLOYED_REV:-None}\n"
+          SUMMARY+="- Versions kept (${#KEPT_REVS[@]}): ${KEPT_REVS[*]}\n"
+          SUMMARY+="- Versions deleted (${#DELETED_REVS[@]}): ${DELETED_REVS[*]}\n"
+          SUMMARY+="- Failed deletions (${#FAILED_REVS[@]}): ${FAILED_REVS[*]}\n"
           
           # Set outputs
           echo "kept-count=$KEPT" >> $GITHUB_OUTPUT
@@ -870,7 +910,8 @@ jobs:
           
           echo "::endgroup::"
 
-      - name: Add Cleanup Info to Summary
+      - name: Add Cleanup Summary to Step Summary
+        if: always()
         run: |
           {
             echo "============================================================"
@@ -883,6 +924,27 @@ jobs:
               echo -e "${{ env.prod_summary }}"
             fi
           } >> $GITHUB_STEP_SUMMARY
+
+      - name: Add Cleanup Info to Deployment Summary
+        if: always()
+        run: |
+          CLEANUP_SUMMARY="## Version Cleanup Results\n\n"
+          CLEANUP_SUMMARY+="### Non-Production\n"
+          CLEANUP_SUMMARY+="- Versions Kept: ${{ steps.nonprod-cleanup.outputs.kept-count }}\n"
+          CLEANUP_SUMMARY+="- Versions Deleted: ${{ steps.nonprod-cleanup.outputs.deleted-count }}\n"
+          CLEANUP_SUMMARY+="- Failed Deletions: ${{ steps.nonprod-cleanup.outputs.failed-count }}\n"
+          
+          if [[ "${{ inputs.is_production }}" == "true" ]]; then
+            CLEANUP_SUMMARY+="\n### Production\n"
+            CLEANUP_SUMMARY+="- Versions Kept: ${{ steps.prod-cleanup.outputs.kept-count }}\n"
+            CLEANUP_SUMMARY+="- Versions Deleted: ${{ steps.prod-cleanup.outputs.deleted-count }}\n"
+            CLEANUP_SUMMARY+="- Failed Deletions: ${{ steps.prod-cleanup.outputs.failed-count }}\n"
+          fi
+          
+          echo "cleanup_summary<<EOF" >> $GITHUB_ENV
+          echo -e "$CLEANUP_SUMMARY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV          
+
           
   Deployment_Summary:
     needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
