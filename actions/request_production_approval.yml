@@ -5,49 +5,210 @@ on:
   workflow_call:
     inputs:
       proxy_name:
+        description: The name of the API proxy
         required: true
         type: string
       version_id:
+        description: Version ID of the deployment
         required: true
         type: string
       revision:
+        description: The revision number for production deployment
         required: true
         type: string
+      environment_group:
+        description: The environment group for deployment
+        required: false
+        type: string
+        default: 'default'
     outputs:
-      revision:
-        description: "The approved revision number"
-        value: ${{ inputs.revision }}
-      version_id:
+      approval_status:
+        description: "The status of the production approval"
+        value: ${{ jobs.request_approval.outputs.status }}
+      approved_version:
         description: "The approved version ID"
-        value: ${{ inputs.version_id }}
+        value: ${{ jobs.request_approval.outputs.version_id }}
+      approved_revision:
+        description: "The approved revision number"
+        value: ${{ jobs.request_approval.outputs.revision }}
 
 jobs:
   request_approval:
     runs-on: ubuntu-latest
-    environment:
+    environment: 
       name: production-approval
+    timeout-minutes: 4320  # 3 days
+    outputs:
+      status: ${{ steps.approval_status.outputs.status }}
+      version_id: ${{ steps.approval_status.outputs.version_id }}
+      revision: ${{ steps.approval_status.outputs.revision }}
+
     steps:
-      - name: Set Deployment Status
+      - name: Initialize Approval Request
+        id: init
         run: |
-          echo "::group::👥 Production Deployment Request"
-          echo "✅ Non-prod deployment successful"
-          echo "⏳ Awaiting production approval"
-          echo "📦 Proxy: ${{ inputs.proxy_name }}"
-          echo "📝 Revision: ${{ inputs.revision }}"
-          echo "🏷️ Version ID: ${{ inputs.version_id }}"
+          echo "::group::🚀 Initializing Production Approval Request"
+          echo "Starting approval process at $(date)"
+          mkdir -p approval-artifacts
           echo "::endgroup::"
 
-      - name: Download Artifacts
+      - name: Download Deployment Artifacts
         uses: actions/download-artifact@v3
         with:
           name: proxy-artifacts-${{ inputs.version_id }}
-          path: artifacts
+          path: approval-artifacts
 
-      - name: List Downloaded Artifacts
+      - name: Verify Artifacts
+        id: verify_artifacts
         run: |
-          echo "::group::📦 Production Deployment Artifacts"
-          echo "Verifying artifacts..."
-          ls -la artifacts/
-          echo "📝 Source revision: $(cat artifacts/revision.txt)"
+          echo "::group::📦 Verifying Deployment Artifacts"
+          
+          # Check if artifacts exist
+          if [ ! -f "approval-artifacts/revision.txt" ] || \
+             [ ! -f "approval-artifacts/proxy-${{ inputs.version_id }}.zip" ]; then
+            echo "❌ Error: Required artifacts not found"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Verify revision number matches
+          ARTIFACT_REVISION=$(cat approval-artifacts/revision.txt)
+          if [ "$ARTIFACT_REVISION" != "${{ inputs.revision }}" ]; then
+            echo "❌ Error: Revision mismatch"
+            echo "Expected: ${{ inputs.revision }}"
+            echo "Found: $ARTIFACT_REVISION"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
           echo "✅ Artifacts verified successfully"
+          echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
+
+      - name: Generate Approval Summary
+        id: generate_summary
+        run: |
+          echo "::group::📝 Generating Approval Summary"
+          
+          # Create approval summary
+          cat << EOF > approval-artifacts/approval-summary.md
+          # Production Deployment Approval Request
+          
+          ## Deployment Details
+          - **API Proxy**: ${{ inputs.proxy_name }}
+          - **Version ID**: ${{ inputs.version_id }}
+          - **Revision**: ${{ inputs.revision }}
+          - **Environment Group**: ${{ inputs.environment_group }}
+          
+          ## Artifacts
+          - Revision File: \`$(ls -l approval-artifacts/revision.txt)\`
+          - Proxy Bundle: \`$(ls -l approval-artifacts/proxy-${{ inputs.version_id }}.zip)\`
+          
+          ## Change Summary
+          - Non-Production deployment successful
+          - Artifacts verified and ready for production deployment
+          - Awaiting approval for production deployment
+          
+          ## Important Notes
+          - This deployment requires manual approval
+          - Review the changes before approving
+          - Production deployment will proceed upon approval
+          
+          ## Timestamps
+          - Request Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - Approval Timeout: 3 days from request
+          
+          ## Additional Information
+          - Environment: Production
+          - Deployment Type: API Proxy
+          - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          
+          echo "✅ Approval summary generated"
+          cat approval-artifacts/approval-summary.md
+          echo "::endgroup::"
+
+      - name: Create Approval Request Issue
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('approval-artifacts/approval-summary.md', 'utf8');
+            
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Production Approval Required: ${process.env.PROXY_NAME} v${process.env.VERSION_ID}`,
+              body: summary,
+              labels: ['production-approval', 'pending']
+            });
+            
+            console.log(`Created issue #${issue.data.number}`);
+            return issue.data.number;
+        env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          VERSION_ID: ${{ inputs.version_id }}
+
+      - name: Upload Approval Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: approval-artifacts-${{ inputs.version_id }}
+          path: approval-artifacts/
+          retention-days: 5
+
+      - name: Set Approval Status
+        id: approval_status
+        run: |
+          echo "::group::✔️ Setting Approval Status"
+          
+          if [ "${{ steps.verify_artifacts.outputs.status }}" == "success" ]; then
+            echo "status=approved" >> $GITHUB_OUTPUT
+            echo "version_id=${{ inputs.version_id }}" >> $GITHUB_OUTPUT
+            echo "revision=${{ inputs.revision }}" >> $GITHUB_OUTPUT
+            echo "✅ Approval request completed successfully"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ Approval request failed"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Notify Approval Status
+        if: always()
+        run: |
+          if [ "${{ steps.approval_status.outputs.status }}" == "approved" ]; then
+            echo "::notice title=✅ Approval Request Created::Production deployment approval request created successfully. Issue #${{ steps.create_issue.outputs.result }}"
+          else
+            echo "::error title=❌ Approval Request Failed::Failed to create production deployment approval request"
+            exit 1
+          fi
+
+      - name: Update Issue Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ steps.create_issue.outputs.result }};
+            const status = '${{ steps.approval_status.outputs.status }}';
+            
+            if (status === 'approved') {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['approved']
+              });
+              
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: 'pending'
+              });
+            }
+
+      - name: Wait for Approval
+        run: |
+          echo "::notice::Waiting for production deployment approval..."
+          echo "Review and approve the deployment through the GitHub environment protection rules."
