@@ -1,3 +1,4 @@
+# File: .github/workflows/validate_inputs.yml
 name: Validate Deployment Inputs
 
 on:
