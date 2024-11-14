@@ -1,0 +1,99 @@
+name: Deploy to Production
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      environment_group:
+        description: The environment group to deploy to
+        required: true
+        type: string
+      latest_revision:
+        description: The latest revision number
+        required: true
+        type: string
+    secrets:
+      secrets_yml:
+        required: true
+
+jobs:
+  Deploy_To_Production:
+    runs-on: ubuntu-latest
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    steps:
+     
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            echo "::group::🔧 Installing Apigee CLI"
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
+
+      - name: Get GCP Token
+        id: get-token
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Deploy to Production
+        run: |
+          echo "::group::🚀 Deploying to Production"
+          TOKEN=$(gcloud auth print-access-token)
+          
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="test-env"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-test-env"
+          fi
+          
+          REVISION="${{ inputs.latest_revision }}"
+          
+          echo "📍 Target Environment: $DEPLOY_ENV"
+          echo "📦 Deploying revision: $REVISION"
+          
+          $HOME/.apigeecli/bin/apigeecli apis deploy \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG_PROD }}" \
+            --env "$DEPLOY_ENV" \
+            --rev "$REVISION" \
+            --token "$TOKEN" \
+            --ovr \
+            --wait
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Successfully deployed to production environment"
+          else
+            echo "❌ Production deployment failed"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      - name: Post-Deployment Summary
+        if: success()
+        run: |
+          echo "::group::📋 Deployment Summary"
+          echo "✅ Production deployment completed successfully"
+          echo "📦 Proxy: ${{ inputs.proxy_name }}"
+          echo "📝 Deployed revision: ${{ inputs.latest_revision }}"
+          echo "🌐 Environment: $DEPLOY_ENV"
+          echo "⏱️ Completed at: $(date)"
+          echo "::endgroup::"

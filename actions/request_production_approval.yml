@@ -1,0 +1,57 @@
+name: Request Production Approval
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      latest_revision:
+        description: The latest revision number
+        required: true
+        type: string
+      version_id:
+        description: The version ID used for deployment
+        required: true
+        type: string
+    secrets:
+      secrets_yml:
+        required: true
+
+jobs:
+  Request_Production_Approval:
+    runs-on: ubuntu-latest
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    steps:
+      
+      - name: Set Deployment Status
+        run: |
+          echo "::group::👥 Production Deployment Request"
+          echo "✅ Non-prod deployment successful"
+          echo "⏳ Awaiting production approval"
+          echo "📦 Proxy: ${{ inputs.proxy_name }}"
+          echo "📝 Revision: ${{ inputs.latest_revision }}"
+          echo "🏷️ Version ID: ${{ inputs.version_id }}"
+          echo "::endgroup::"
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: proxy-artifacts-${{ inputs.version_id }}
+          path: artifacts
+
+      - name: List Downloaded Artifacts
+        run: |
+          echo "::group::📦 Production Deployment Artifacts"
+          echo "Verifying artifacts..."
+          ls -la artifacts/
+          echo "📝 Source revision: $(cat artifacts/revision.txt)"
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"

@@ -1,0 +1,146 @@
+name: Build and Upload Prod
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      version_id:
+        description: The version ID used for deployment
+        required: true
+        type: string
+    secrets:
+      secrets_yml:
+        required: true
+
+jobs:
+  Build_And_Upload_Prod:
+    runs-on: ubuntu-latest
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    steps:
+      
+      - name: Set Version ID
+        id: set-version
+        run: |
+          echo "VERSION_ID=${{ inputs.version_id }}" >> $GITHUB_ENV
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: proxy-artifacts-${{ inputs.version_id }}
+          path: artifacts
+
+      - name: Verify Download
+        run: |
+          echo "::group::📦 Verifying Downloaded Artifacts"
+          echo "Looking for artifacts with version ID: ${{ inputs.version_id }}"
+          ls -la artifacts/ || echo "Artifacts directory is empty or doesn't exist"
+          
+          if [ ! -f "artifacts/revision.txt" ]; then
+            echo "❌ Error: revision.txt not found"
+            exit 1
+          fi
+          
+          if [ ! -f "artifacts/proxy-${{ inputs.version_id }}.zip" ]; then
+            echo "❌ Error: proxy bundle not found"
+            exit 1
+          fi
+          
+          echo "📝 Source revision: $(cat artifacts/revision.txt)"
+          echo "✅ Artifacts verified successfully"
+          echo "::endgroup::"
+
+      - name: Install apigeecli
+        id: install-apigeecli
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: |
+            echo "::group::🔧 Installing Apigee CLI"
+            mkdir -p $HOME/.apigeecli/bin
+            curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+            echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+            echo "✅ apigeecli installed successfully"
+            echo "::endgroup::"
+
+      - name: Get GCP Token
+        id: get-token
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Upload and Sync Revision
+        id: upload_and_sync
+        run: |
+          echo "::group::📤 Uploading to Production"
+          SOURCE_REVISION=$(cat artifacts/revision.txt)
+          echo "📝 Target revision: $SOURCE_REVISION"
+          
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Verify bundle exists before attempting upload
+          if [ ! -f "artifacts/proxy-${{ inputs.version_id }}.zip" ]; then
+            echo "❌ Error: Bundle file not found at expected location"
+            ls -la artifacts/
+            exit 1
+          fi
+          
+          echo "Beginning upload process..."
+          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+            -n "${{ inputs.proxy_name }}" \
+            -p "artifacts/proxy-${{ inputs.version_id }}.zip" \
+            --org "${{ secrets.APIGEE_ORG_PROD }}" \
+            --token "$TOKEN")
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Initial upload failed"
+            echo "$IMPORT_OUTPUT"
+            exit 1
+          fi
+          
+          CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+          echo "Current revision in prod: $CURRENT_REVISION"
+          
+          # Continue uploading until we reach or exceed the target revision
+          while [ "$CURRENT_REVISION" -lt "$SOURCE_REVISION" ]; do
+            echo "Uploading to increment revision..."
+            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+              -n "${{ inputs.proxy_name }}" \
+              -p "artifacts/proxy-${{ inputs.version_id }}.zip" \
+              --org "${{ secrets.APIGEE_ORG_PROD }}" \
+              --token "$TOKEN")
+            
+            if [ $? -ne 0 ]; then
+              echo "❌ Upload failed during revision sync"
+              echo "$IMPORT_OUTPUT"
+              exit 1
+            fi
+            
+            CURRENT_REVISION=$(echo "$IMPORT_OUTPUT" | grep -oP '"revision":\s*"\K[^"]+')
+            echo "Updated revision: $CURRENT_REVISION"
+          done
+          
+          echo "✅ Successfully synced revision numbers"
+          echo "📝 Final revision: $CURRENT_REVISION"
+          echo "revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Verify Final State
+        run: |
+          echo "::group::✔️ Final Verification"
+          echo "Version ID used: ${{ inputs.version_id }}"
+          echo "Final revision: ${{ steps.upload_and_sync.outputs.revision }}"
+          echo "✅ Build and upload process completed"
+          echo "::endgroup::"

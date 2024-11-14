@@ -1,0 +1,90 @@
+name: Validate Inputs
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      environment_group:
+        description: The environment group to deploy to
+        required: true
+        type: string
+      environment_type:
+        description: The environment types to deploy to
+        required: true
+        type: string
+      is_production:
+        description: Is this a production deployment?
+        required: true
+        type: boolean
+    secrets:
+      secrets_yml:
+        required: true
+
+jobs:
+  validate_deployment_inputs:
+    runs-on: ubuntu-latest
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    steps:
+    
+      - name: Validate Environment Configuration
+        id: validate
+        run: |
+          echo "::group::🔍 Validating Deployment Configuration"
+          echo "Starting validation checks..."
+          
+          PROCEED=true
+          DEPLOY_TYPE="non-prod"
+          STATUS="pending"
+          
+          if [[ "${{ inputs.is_production }}" == "true" ]]; then
+            if [[ -z "${{ inputs.non_prod_revision }}" ]]; then
+              echo "❌ Error: Production deployment requires non_prod_revision"
+              PROCEED=false
+              STATUS="failed"
+            else
+              DEPLOY_TYPE="prod"
+              echo "✅ Production deployment validated with revision ${{ inputs.non_prod_revision }}"
+            fi
+          fi
+          
+          case "${{ inputs.environment_group }}" in
+            "default"|"edd"|"homerun"|"wow"|"wpay"|"prod")
+              echo "✅ Environment group validation passed"
+              ;;
+            *)
+              echo "❌ Error: Invalid environment group"
+              PROCEED=false
+              STATUS="failed"
+              ;;
+          esac
+          
+          case "${{ inputs.environment_type }}" in
+            "dev"|"test-env"|"test"|"uat"|"prod")
+              echo "✅ Environment type validation passed"
+              echo "environment=${{ inputs.environment_type }}" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "❌ Error: Invalid environment type"
+              PROCEED=false
+              STATUS="failed"
+              ;;
+          esac
+          
+          if [[ "$PROCEED" == "true" ]]; then
+            STATUS="validated"
+            echo "✅ All validation checks passed"
+          fi
+          
+          echo "can_proceed=$PROCEED" >> $GITHUB_OUTPUT
+          echo "deployment_type=$DEPLOY_TYPE" >> $GITHUB_OUTPUT
+          echo "deployment_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
