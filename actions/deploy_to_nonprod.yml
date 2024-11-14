@@ -1,0 +1,89 @@
+name: Deploy to Non-Prod
+
+on:
+  workflow_call:
+    inputs:
+      proxy_name:
+        description: The name of the API proxy to deploy
+        required: true
+        type: string
+      environment_group:
+        description: The environment group to deploy to
+        required: true
+        type: string
+      environment_type:
+        description: The environment types to deploy to
+        required: true
+        type: string
+      latest_revision:
+        description: The latest revision number
+        required: true
+        type: string
+    secrets:
+      APIGEE_ORG:
+        required: true
+      WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      SERVICE_ACCOUNT:
+        required: true
+
+jobs:
+  Deploy_To_NonProd:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment_type }}
+    steps:
+      - name: Get GCP Token
+        id: get-token
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: true
+
+      - name: Install apigeecli
+        run: |
+          echo "::group::🚀 Preparing Non-Prod Deployment"
+          mkdir -p $HOME/.apigeecli/bin
+          curl -L https://raw.githubusercontent.com/apigee/apigeecli/main/downloadLatest.sh | sh -
+          echo "$HOME/.apigeecli/bin" >> $GITHUB_PATH
+          echo "✅ apigeecli installed successfully"
+          echo "::endgroup::"
+
+      - name: Deploy to Environment
+        run: |
+          echo "::group::🚀 Deploying to Non-Prod"
+          TOKEN=$(gcloud auth print-access-token)
+          
+          if [ "${{ inputs.environment_group }}" == "default" ]; then
+            DEPLOY_ENV="${{ inputs.environment_type }}"
+          else
+            DEPLOY_ENV="${{ inputs.environment_group }}-${{ inputs.environment_type }}"
+          fi
+          
+          REVISION="${{ inputs.latest_revision }}"
+          
+          if [ -z "$REVISION" ]; then
+            echo "❌ Error: No revision number found"
+            exit 1
+
+            echo "📍 Target Environment: $DEPLOY_ENV"
+          echo "📦 Revision: $REVISION"
+          
+          $HOME/.apigeecli/bin/apigeecli apis deploy \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG }}" \
+            --env "$DEPLOY_ENV" \
+            --rev "$REVISION" \
+            --token "$TOKEN" \
+            --ovr \
+            --wait
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Successfully deployed to $DEPLOY_ENV"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
+          echo "::endgroup::"
