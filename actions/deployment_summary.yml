@@ -20,25 +20,21 @@ on:
         required: true
         type: boolean
     secrets:
-      WORKLOAD_IDENTITY_PROVIDER:
-        required: true
-      WORKLOAD_IDENTITY_PROVIDER_PROD:
-        required: true
-      SERVICE_ACCOUNT:
-        required: true
-      SERVICE_ACCOUNT_PROD:
+      secrets_yml:
         required: true
 
 jobs:
   Deployment_Summary:
     runs-on: ubuntu-latest
-    permissions:
-      checks: write
-      contents: read
-      id-token: write
-      deployments: write
-      issues: write
+    env:
+      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
+      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
+      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
+      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
+      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
     steps:
+      
       - name: Generate Detailed Logs
         run: |
           # Create logs directory and file
