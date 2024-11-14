@@ -664,160 +664,164 @@ jobs:
       deployments: write
       issues: write
     steps:
-      - name: Create Logs Directory
+      - name: Generate Detailed Logs
         run: |
-          mkdir -p deployment_logs
-          echo "# Deployment Logs - $(date '+%Y-%m-%d %H:%M:%S')" > deployment_logs/master_log.md
-
-      - name: Generate Validation Logs
-        run: |
+          # Create logs directory and file
+          mkdir -p logs
+          LOG_FILE="logs/deployment_log_${{ inputs.proxy_name }}_$(date +%Y%m%d_%H%M%S).txt"
+          
           {
-            echo "## 🔍 Validation Phase"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "**Status:** ${{ needs.validate_deployment_inputs.result }}"
-            echo "**Environment Group:** ${{ inputs.environment_group }}"
-            echo "**Environment Type:** ${{ inputs.environment_type }}"
-            echo "**Production Mode:** ${{ inputs.is_production }}"
+            echo "============================================================"
+            echo "                 APIGEE DEPLOYMENT LOGS                      "
+            echo "============================================================"
             echo ""
-          } >> deployment_logs/validation.md
-          cat deployment_logs/validation.md >> deployment_logs/master_log.md
-
-      - name: Generate Authentication Logs
-        run: |
-          {
-            echo "## 🔐 Authentication Phase"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "**Status:** ${{ needs.Setup_Auth.result }}"
-            echo "**Non-Prod Auth:** ${{ needs.Setup_Auth.result == 'success' && '✅ Successful' || '❌ Failed' }}"
-            echo "**Prod Auth:** ${{ needs.Setup_Auth.result == 'success' && inputs.is_production == 'true' && '✅ Successful' || '➖ Not Required' }}"
+            echo "Generated at: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "Proxy Name: ${{ inputs.proxy_name }}"
+            echo "Environment Group: ${{ inputs.environment_group }}"
+            echo "Environment Type: ${{ inputs.environment_type }}"
+            echo "Is Production: ${{ inputs.is_production }}"
             echo ""
-          } >> deployment_logs/auth.md
-          cat deployment_logs/auth.md >> deployment_logs/master_log.md
-
-      - name: Generate Build Logs
-        run: |
-          {
-            echo "## 📦 Build Phase"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "### Non-Production Build"
-            echo "**Status:** ${{ needs.Build_And_Upload_NonProd.result }}"
-            echo "**Revision:** ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
-            echo "**Version ID:** ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
+            
+            echo "============================================================"
+            echo "                 VALIDATION PHASE                            "
+            echo "============================================================"
+            echo "Status: ${{ needs.validate_deployment_inputs.result }}"
+            echo "Can Proceed: ${{ needs.validate_deployment_inputs.outputs.can_proceed }}"
+            echo "Deployment Type: ${{ needs.validate_deployment_inputs.outputs.deployment_type }}"
+            echo "Environment: ${{ needs.validate_deployment_inputs.outputs.environment }}"
+            echo ""
+            
+            echo "============================================================"
+            echo "                 AUTHENTICATION PHASE                        "
+            echo "============================================================"
+            echo "Status: ${{ needs.Setup_Auth.result }}"
+            echo ""
+            
+            echo "============================================================"
+            echo "                 BUILD AND UPLOAD PHASE                      "
+            echo "============================================================"
+            echo "Non-Prod Build Status: ${{ needs.Build_And_Upload_NonProd.result }}"
+            echo "Version ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
+            echo "Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
+            
             if [[ "${{ inputs.is_production }}" == "true" ]]; then
-              echo "### Production Build"
-              echo "**Status:** ${{ needs.Build_And_Upload_Prod.result }}"
-              echo "**Revision:** ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
+              echo ""
+              echo "Production Build Status: ${{ needs.Build_And_Upload_Prod.result }}"
+              echo "Production Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
             fi
             echo ""
-          } >> deployment_logs/build.md
-          cat deployment_logs/build.md >> deployment_logs/master_log.md
-
-      - name: Generate Deployment Logs
-        run: |
-          {
-            echo "## 🚀 Deployment Phase"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "### Non-Production Deployment"
-            echo "**Status:** ${{ needs.Deploy_To_NonProd.result }}"
-            echo "**Environment:** ${{ inputs.environment_group }}-${{ inputs.environment_type }}"
-            echo "**Verification Status:** ${{ needs.Verify_NonProd_Deployment.result }}"
+            
+            echo "============================================================"
+            echo "                 DEPLOYMENT PHASE                            "
+            echo "============================================================"
+            echo "Non-Prod Deployment Status: ${{ needs.Deploy_To_NonProd.result }}"
+            echo "Non-Prod Verification Status: ${{ needs.Verify_NonProd_Deployment.result }}"
+            
             if [[ "${{ inputs.is_production }}" == "true" ]]; then
-              echo "### Production Deployment"
-              echo "**Status:** ${{ needs.Deploy_To_Production.result }}"
-              echo "**Environment:** ${{ inputs.environment_group }}-prod"
+              echo ""
+              echo "Production Approval Status: ${{ needs.Request_Production_Approval.result }}"
+              echo "Production Deployment Status: ${{ needs.Deploy_To_Production.result }}"
             fi
             echo ""
-          } >> deployment_logs/deployment.md
-          cat deployment_logs/deployment.md >> deployment_logs/master_log.md
+            
+            echo "============================================================"
+            echo "                 DEPLOYMENT SUMMARY                          "
+            echo "============================================================"
+            echo "Final Status: ${{ needs.Deploy_To_NonProd.result }}"
+            echo "Deployment Completed at: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "GitHub Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            
+          } > "$LOG_FILE"
+          
+          echo "log_file=$LOG_FILE" >> $GITHUB_ENV
 
-      - name: Generate Performance Metrics
+      - name: Generate Step Summary
+        env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENV_GROUP: ${{ inputs.environment_group }}
+          ENV_TYPE: ${{ inputs.environment_type }}
+          VERSION_ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
         run: |
           {
-            echo "## 📊 Performance Metrics"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "### Job Durations"
-            echo "- Validation: ${{ steps.job_metrics.outputs.validation_duration || 'N/A' }}"
-            echo "- Build: ${{ steps.job_metrics.outputs.build_duration || 'N/A' }}"
-            echo "- Deployment: ${{ steps.job_metrics.outputs.deploy_duration || 'N/A' }}"
-            echo ""
-          } >> deployment_logs/metrics.md
-          cat deployment_logs/metrics.md >> deployment_logs/master_log.md
+            echo "## 📦 Version Information"
+            echo "| Environment | Version ID |"
+            echo "|-------------|------------|"
+            echo "| Non-Production | \`$VERSION_ID\` |"
+            echo "| Production | \`$VERSION_ID\` |"
+          } >> $GITHUB_STEP_SUMMARY
 
-      - name: Create Deployment Summary
-        run: |
-          {
-            echo "## 📋 Final Deployment Summary"
-            echo "**Timestamp:** $(date '+%Y-%m-%d %H:%M:%S')"
-            echo "**Proxy Name:** ${{ inputs.proxy_name }}"
-            echo "**Overall Status:** $(if [[ "${{ needs.Deploy_To_NonProd.result }}" == "success" ]]; then echo "✅ Success"; else echo "❌ Failed"; fi)"
-            echo "**Version ID:** ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}"
-            echo ""
-            echo "### 🎯 Environment Details"
-            echo "- Group: ${{ inputs.environment_group }}"
-            echo "- Type: ${{ inputs.environment_type }}"
-            echo "- Is Production: ${{ inputs.is_production }}"
-            echo ""
-            echo "### 📝 Revision Information"
-            echo "- Non-Prod Revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}"
-            [[ "${{ inputs.is_production }}" == "true" ]] && echo "- Prod Revision: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}"
-            echo ""
-          } >> deployment_logs/summary.md
-          cat deployment_logs/summary.md >> deployment_logs/master_log.md
-
-      - name: Upload Logs as Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: deployment-logs-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
-          path: deployment_logs
-          retention-days: 30
-
-      - name: Create Email Notification with Logs
+      - name: Create Email Notification
         uses: actions/github-script@v7
+        env:
+          PROXY_NAME: ${{ inputs.proxy_name }}
+          ENV_GROUP: ${{ inputs.environment_group }}
+          ENV_TYPE: ${{ inputs.environment_type }}
+          NONPROD_DEPLOY_RESULT: ${{ needs.Deploy_To_NonProd.result }}
+          NONPROD_REVISION: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
+          PROD_DEPLOY_RESULT: ${{ needs.Deploy_To_Production.result }}
+          PROD_REVISION: ${{ needs.Build_And_Upload_Prod.outputs.latest_revision }}
+          VERSION_ID: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+          LOG_FILE: ${{ env.log_file }}
         with:
           script: |
             const fs = require('fs');
-            const masterLog = fs.readFileSync('deployment_logs/master_log.md', 'utf8');
+            const logContent = fs.readFileSync(process.env.LOG_FILE, 'utf8');
             
-            const summaryTemplate = `# 🚀 Apigee Proxy Deployment Summary
-            
+            const summary = `# 🚀 Apigee Proxy Deployment Summary
+
             @${context.actor}, your deployment has completed!
-            
-            ## 📋 Quick Status
+
+            ## 📋 Deployment Status
             | Category | Details |
             |----------|---------|
-            | Proxy Name | \`${{ inputs.proxy_name }}\` |
-            | Environment | \`${{ inputs.environment_group }}-${{ inputs.environment_type }}\` |
-            | Status | ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'} |
-            | Version ID | \`${{ needs.Build_And_Upload_NonProd.outputs.version_id }}\` |
-            
+            | Proxy Name | \`${process.env.PROXY_NAME}\` |
+            | Environment | \`${process.env.ENV_GROUP}-${process.env.ENV_TYPE}\` |
+            | Non-Prod Status | ${process.env.NONPROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'} |
+            | Non-Prod Revision | \`${process.env.NONPROD_REVISION}\` |
+            ${process.env.PROD_REVISION ? `| Prod Status | ${process.env.PROD_DEPLOY_RESULT === 'success' ? '✅ Success' : '❌ Failed'} |
+            | Prod Revision | \`${process.env.PROD_REVISION}\` |` : ''}
+
+            ## 📦 Version Details
+            | Environment | Version ID |
+            |-------------|------------|
+            | Non-Production | \`${process.env.VERSION_ID}\` |
+            | Production | \`${process.env.VERSION_ID}\` |
+
             ## 📝 Detailed Logs
             <details>
             <summary>Click to expand deployment logs</summary>
-            
-            ${masterLog}
-            
+
+            \`\`\`
+            ${logContent}
+            \`\`\`
+
             </details>
-            
-            ## 🔗 Links
-            - [View Deployment Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
-            - [Download Full Logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts)
-            
+
+            ## 🔗 Details
+            [View Full Deployment Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+
             ---
-            ⚡ Generated at ${new Date().toISOString()}`;
-            
-            // Create issue with deployment summary
+            ⚡ *Generated at ${new Date().toISOString()}*`;
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Deployment Summary: ${{ inputs.proxy_name }} (${new Date().toISOString().split('T')[0]})`,
-              body: summaryTemplate,
+              title: `Deployment Summary: ${process.env.PROXY_NAME} (${new Date().toISOString().split('T')[0]})`,
+              body: summary,
               labels: ['deployment', process.env.NONPROD_DEPLOY_RESULT === 'success' ? 'success' : 'failed']
             });
+
+      - name: Save Log File
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-logs-${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+          path: ${{ env.log_file }}
+          retention-days: 30
 
       - name: Notify in GitHub UI
         run: |
           if [[ "${{ needs.Deploy_To_NonProd.result }}" == "success" ]]; then
-            echo "::notice title=✅ Deployment Successful::Deployment of ${{ inputs.proxy_name }} completed successfully. Check the created issue for detailed logs."
+            echo "::notice title=✅ Deployment Successful::Deployment of ${{ inputs.proxy_name }} has completed successfully. Check your notifications for details."
           else
-            echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} completed with issues. Check the created issue for detailed logs."
+            echo "::warning title=❌ Deployment Issue::Deployment of ${{ inputs.proxy_name }} has completed with issues. Check your notifications for details."
           fi
