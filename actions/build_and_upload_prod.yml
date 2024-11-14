@@ -1,65 +1,85 @@
-name: Build and Upload Prod
+# File: .github/workflows/build_and_upload_prod.yml
+name: Build and Upload Production
 
 on:
   workflow_call:
     inputs:
       proxy_name:
-        description: The name of the API proxy to deploy
+        description: The name of the API proxy
         required: true
         type: string
       version_id:
-        description: The version ID used for deployment
+        description: Version ID from non-prod build
         required: true
         type: string
     secrets:
-      secrets_yml:
+      APIGEE_ORG_PROD:
         required: true
+      WORKLOAD_IDENTITY_PROVIDER_PROD:
+        required: true
+      SERVICE_ACCOUNT_PROD:
+        required: true
+    outputs:
+      latest_revision:
+        description: "The uploaded revision number"
+        value: ${{ jobs.build_and_upload.outputs.revision }}
+      upload_status:
+        description: "Status of the upload process"
+        value: ${{ jobs.build_and_upload.outputs.status }}
 
 jobs:
-  Build_And_Upload_Prod:
+  build_and_upload:
     runs-on: ubuntu-latest
-    env:
-      APIGEE_ORG: ${{ secrets.secrets_yml.APIGEE_ORG }}
-      APIGEE_ORG_PROD: ${{ secrets.secrets_yml.APIGEE_ORG_PROD }}
-      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER }}
-      WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.secrets_yml.WORKLOAD_IDENTITY_PROVIDER_PROD }}
-      SERVICE_ACCOUNT: ${{ secrets.secrets_yml.SERVICE_ACCOUNT }}
-      SERVICE_ACCOUNT_PROD: ${{ secrets.secrets_yml.SERVICE_ACCOUNT_PROD }}
+    outputs:
+      revision: ${{ steps.upload_and_sync.outputs.revision }}
+      status: ${{ steps.final_status.outputs.status }}
+
     steps:
-      
       - name: Set Version ID
         id: set-version
         run: |
+          echo "::group::🏷️ Setting Version Information"
           echo "VERSION_ID=${{ inputs.version_id }}" >> $GITHUB_ENV
+          echo "✅ Version ID set: ${{ inputs.version_id }}"
+          echo "::endgroup::"
 
-      - name: Download Artifacts
+      - name: Download Non-Prod Artifacts
+        id: download-artifacts
         uses: actions/download-artifact@v3
         with:
           name: proxy-artifacts-${{ inputs.version_id }}
           path: artifacts
 
-      - name: Verify Download
+      - name: Verify Downloaded Artifacts
+        id: verify-artifacts
         run: |
           echo "::group::📦 Verifying Downloaded Artifacts"
           echo "Looking for artifacts with version ID: ${{ inputs.version_id }}"
+          
+          # List downloaded artifacts
           ls -la artifacts/ || echo "Artifacts directory is empty or doesn't exist"
           
+          # Check for required files
           if [ ! -f "artifacts/revision.txt" ]; then
             echo "❌ Error: revision.txt not found"
+            echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           if [ ! -f "artifacts/proxy-${{ inputs.version_id }}.zip" ]; then
             echo "❌ Error: proxy bundle not found"
+            echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
           
           echo "📝 Source revision: $(cat artifacts/revision.txt)"
           echo "✅ Artifacts verified successfully"
+          echo "status=success" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
       - name: Install apigeecli
         id: install-apigeecli
+        if: steps.verify-artifacts.outputs.status == 'success'
         uses: nick-invision/retry@v2
         with:
           timeout_minutes: 5
@@ -72,22 +92,25 @@ jobs:
             echo "✅ apigeecli installed successfully"
             echo "::endgroup::"
 
-      - name: Get GCP Token
-        id: get-token
-        uses: google-github-actions/auth@v1
+      - name: Setup Google Cloud Auth
+        id: auth
+        if: steps.verify-artifacts.outputs.status == 'success'
+        uses: 'google-github-actions/auth@v1'
         with:
           workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
           service_account: ${{ secrets.SERVICE_ACCOUNT_PROD }}
-          token_format: access_token
+          token_format: 'access_token'
           create_credentials_file: true
 
       - name: Upload and Sync Revision
         id: upload_and_sync
+        if: steps.verify-artifacts.outputs.status == 'success'
         run: |
           echo "::group::📤 Uploading to Production"
           SOURCE_REVISION=$(cat artifacts/revision.txt)
           echo "📝 Target revision: $SOURCE_REVISION"
           
+          # Get access token
           TOKEN=$(gcloud auth print-access-token)
           
           # Verify bundle exists before attempting upload
@@ -98,15 +121,45 @@ jobs:
           fi
           
           echo "Beginning upload process..."
-          IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-            -n "${{ inputs.proxy_name }}" \
-            -p "artifacts/proxy-${{ inputs.version_id }}.zip" \
-            --org "${{ secrets.APIGEE_ORG_PROD }}" \
-            --token "$TOKEN")
           
-          if [ $? -ne 0 ]; then
-            echo "❌ Initial upload failed"
-            echo "$IMPORT_OUTPUT"
+          # Function to handle upload with retry
+          upload_with_retry() {
+            local max_attempts=3
+            local attempt=1
+            local delay=5
+            
+            while [ $attempt -le $max_attempts ]; do
+              echo "Upload attempt $attempt of $max_attempts..."
+              
+              IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
+                -n "${{ inputs.proxy_name }}" \
+                -p "artifacts/proxy-${{ inputs.version_id }}.zip" \
+                --org "${{ secrets.APIGEE_ORG_PROD }}" \
+                --token "$TOKEN")
+              
+              if [ $? -eq 0 ]; then
+                echo "✅ Upload successful"
+                echo "$IMPORT_OUTPUT"
+                return 0
+              fi
+              
+              echo "⚠️ Upload attempt failed"
+              echo "$IMPORT_OUTPUT"
+              
+              ((attempt++))
+              if [ $attempt -le $max_attempts ]; then
+                echo "Waiting $delay seconds before retry..."
+                sleep $delay
+                ((delay*=2))
+              fi
+            done
+            
+            return 1
+          }
+          
+          # Initial upload
+          if ! upload_with_retry; then
+            echo "❌ All upload attempts failed"
             exit 1
           fi
           
@@ -116,15 +169,9 @@ jobs:
           # Continue uploading until we reach or exceed the target revision
           while [ "$CURRENT_REVISION" -lt "$SOURCE_REVISION" ]; do
             echo "Uploading to increment revision..."
-            IMPORT_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis create bundle \
-              -n "${{ inputs.proxy_name }}" \
-              -p "artifacts/proxy-${{ inputs.version_id }}.zip" \
-              --org "${{ secrets.APIGEE_ORG_PROD }}" \
-              --token "$TOKEN")
             
-            if [ $? -ne 0 ]; then
-              echo "❌ Upload failed during revision sync"
-              echo "$IMPORT_OUTPUT"
+            if ! upload_with_retry; then
+              echo "❌ Revision sync failed"
               exit 1
             fi
             
@@ -137,10 +184,85 @@ jobs:
           echo "revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
-      - name: Verify Final State
+      - name: Verify Upload
+        id: verify-upload
+        if: success()
         run: |
-          echo "::group::✔️ Final Verification"
-          echo "Version ID used: ${{ inputs.version_id }}"
-          echo "Final revision: ${{ steps.upload_and_sync.outputs.revision }}"
-          echo "✅ Build and upload process completed"
+          echo "::group::✔️ Verifying Upload"
+          
+          # Get access token
+          TOKEN=$(gcloud auth print-access-token)
+          
+          # Verify the uploaded revision
+          VERIFY_OUTPUT=$($HOME/.apigeecli/bin/apigeecli apis get \
+            --name "${{ inputs.proxy_name }}" \
+            --org "${{ secrets.APIGEE_ORG_PROD }}" \
+            --rev "${{ steps.upload_and_sync.outputs.revision }}" \
+            --token "$TOKEN")
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Upload verification successful"
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Upload verification failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           echo "::endgroup::"
+
+      - name: Generate Upload Report
+        if: always()
+        run: |
+          echo "::group::📝 Generating Upload Report"
+          mkdir -p upload-reports
+          
+          # Create report file
+          REPORT_FILE="upload-reports/prod_upload_report_$(date +%Y%m%d_%H%M%S).md"
+          
+          cat << EOF > "$REPORT_FILE"
+          # Production Upload Report
+          
+          ## Upload Details
+          - **API Proxy**: ${{ inputs.proxy_name }}
+          - **Version ID**: ${{ inputs.version_id }}
+          - **Target Revision**: $(cat artifacts/revision.txt)
+          - **Final Revision**: ${{ steps.upload_and_sync.outputs.revision }}
+          - **Status**: ${{ steps.verify-upload.outputs.status }}
+          
+          ## Process Timeline
+          - **Started**: $(date -d @${{ github.event.repository.created_at }} '+%Y-%m-%d %H:%M:%S UTC')
+          - **Completed**: $(date '+%Y-%m-%d %H:%M:%S UTC')
+          
+          ## Verification Results
+          - Artifact Verification: ${{ steps.verify-artifacts.outputs.status }}
+          - Upload Verification: ${{ steps.verify-upload.outputs.status }}
+          
+          ## Additional Information
+          - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Upload User: ${{ github.actor }}
+          EOF
+          
+          echo "✅ Upload report generated: $REPORT_FILE"
+          echo "::endgroup::"
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: prod-upload-reports-${{ inputs.version_id }}
+          path: upload-reports/
+          retention-days: 30
+
+      - name: Set Final Status
+        id: final_status
+        if: always()
+        run: |
+          if [ "${{ steps.verify-artifacts.outputs.status }}" == "success" ] && \
+             [ "${{ steps.verify-upload.outputs.status }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "::notice::Production upload completed successfully"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "::error::Production upload failed"
+            exit 1
+          fi
