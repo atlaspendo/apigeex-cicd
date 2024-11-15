@@ -127,7 +127,7 @@ jobs:
       WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
       SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
 
-  Deploy_To_Production:
+  Deploy_To_Production: 
     needs: [Build_And_Upload_Prod]
     if: needs.Build_And_Upload_Prod.result == 'success'
     uses: atlaspendo/apigeex-cicd/.github/workflows/deploy_to_production.yml@main
