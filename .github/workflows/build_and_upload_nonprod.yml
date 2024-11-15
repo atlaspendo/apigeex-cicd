@@ -22,11 +22,11 @@ on:
         required: true
     outputs:
       latest_revision:
-        description: "The deployed revision number"
-        value: ${{ jobs.build_and_upload.outputs.revision }}
-      version_id:
-        description: "The version ID used for deployment"
-        value: ${{ jobs.build_and_upload.outputs.version_id }}
+        description: "Latest revision number"
+        value: ${{ jobs.build.outputs.revision }}
+      version_id:  # Add this output
+        description: "Version ID for deployment"
+        value: ${{ jobs.build.outputs.version_id }}
 
 jobs:
   build_and_upload:
