@@ -33,6 +33,11 @@ on:
         description: GitHub event that triggered the workflow
         required: true
         type: string
+      version_id:  # Add this input
+        description: Version ID for deployment
+        required: false
+        type: string
+        default: ''
     outputs:
       revision:
         description: "The deployed revision number"
@@ -112,7 +117,7 @@ jobs:
     uses: atlaspendo/apigeex-cicd/.github/workflows/request_production_approval.yml@main
     with:
       proxy_name: ${{ inputs.proxy_name }}
-      version_id: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+      version_id: ${{ inputs.version_id != '' && inputs.version_id || needs.Build_And_Upload_NonProd.outputs.version_id }}
       revision: ${{ needs.Build_And_Upload_NonProd.outputs.latest_revision }}
 
   Build_And_Upload_Prod:
@@ -121,7 +126,7 @@ jobs:
     uses: atlaspendo/apigeex-cicd/.github/workflows/build_and_upload_prod.yml@main
     with:
       proxy_name: ${{ inputs.proxy_name }}
-      version_id: ${{ needs.Build_And_Upload_NonProd.outputs.version_id }}
+      version_id: ${{ inputs.version_id != '' && inputs.version_id || needs.Build_And_Upload_NonProd.outputs.version_id }}
     secrets:
       APIGEE_ORG_PROD: ${{ secrets.APIGEE_ORG_PROD }}
       WORKLOAD_IDENTITY_PROVIDER_PROD: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_PROD }}
