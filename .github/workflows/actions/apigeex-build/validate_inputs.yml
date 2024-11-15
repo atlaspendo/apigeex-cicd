@@ -85,7 +85,7 @@ jobs:
           
           if [[ "$PROCEED" == "true" ]]; then
             STATUS="validated"
-            echo "✅ All validation checks passed"
+            echo "✅ All validation checks successfully passed"
           fi
           
           echo "can_proceed=$PROCEED" >> $GITHUB_OUTPUT
