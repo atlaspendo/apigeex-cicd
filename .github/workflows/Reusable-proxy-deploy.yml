@@ -875,7 +875,7 @@ jobs:
 
           
   Deployment_Summary:
-    needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production]
+    needs: [validate_deployment_inputs, Setup_Auth, Validate_API_Proxy, Build_And_Upload_NonProd, Deploy_To_NonProd, Verify_NonProd_Deployment, Request_Production_Approval, Build_And_Upload_Prod, Deploy_To_Production, Clean_Old_Versions]
     if: always()
     runs-on: ubuntu-latest
     permissions:
