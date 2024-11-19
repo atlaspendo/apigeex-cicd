@@ -183,12 +183,13 @@ jobs:
       - name: Install apigeelint
         run: |
           echo "::group::🔍 Installing API Proxy Validator"
-          npm install -g apigeelint
+          npm install -g apigeelint@latest
           if [ $? -ne 0 ]; then
             echo "❌ Failed to install apigeelint"
             exit 1
           fi
           echo "✅ apigeelint installed successfully"
+          echo "Installed apigeelint version: $(apigeelint --version)"
           echo "::endgroup::"
 
       - name: Run apigeelint with profiling
