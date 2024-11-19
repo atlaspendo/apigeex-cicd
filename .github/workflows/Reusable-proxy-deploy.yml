@@ -203,8 +203,8 @@ jobs:
             exit 1
           fi
           
-          # Execute apigeelint
-          apigeelint -s ${{ inputs.proxy_directory }} -f table.js -profile | tee apigeelint-profile.txt
+          # Linting the API proxy for the specified profile
+          apigeelint -s ${{ inputs.proxy_directory }} -f table.js --profile apigeex | tee apigeelint-profile.txt
           
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo "❌ API proxy validation failed"
