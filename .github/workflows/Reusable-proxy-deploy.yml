@@ -197,9 +197,16 @@ jobs:
           echo "::group::🔍 Validating API Proxy"
           echo "Running apigeelint validation with profiling..."
           
-          apigeelint -s ${{ inputs.proxy_directory }} -f table.js -p > apigeelint-profile.txt
+          # Ensuring proxy_directory is set
+          if [ -z "${{ inputs.proxy_directory }}" ]; then
+            echo "❌ Proxy directory input is missing or empty."
+            exit 1
+          fi
           
-          if [ $? -ne 0 ]; then
+          # Execute apigeelint
+          apigeelint -s ${{ inputs.proxy_directory }} -f table.js -p | tee apigeelint-profile.txt
+          
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo "❌ API proxy validation failed"
             cat apigeelint-profile.txt
             exit 1
