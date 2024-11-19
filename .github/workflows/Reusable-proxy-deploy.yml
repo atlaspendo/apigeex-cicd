@@ -191,16 +191,27 @@ jobs:
           echo "✅ apigeelint installed successfully"
           echo "::endgroup::"
 
-      - name: Run apigeelint
+      - name: Run apigeelint with profiling
         run: |
           echo "::group::🔍 Validating API Proxy"
-          echo "Running apigeelint validation..."
-          apigeelint -s ${{ inputs.proxy_directory }} -f table.js
+          echo "Running apigeelint validation with profiling..."
+          
+          apigeelint -s ${{ inputs.proxy_directory }} -f table.js -p > apigeelint-profile.txt
+          
           if [ $? -ne 0 ]; then
             echo "❌ API proxy validation failed"
+            cat apigeelint-profile.txt
             exit 1
           fi
+          
           echo "✅ API proxy validation passed"
+          echo "::endgroup::"
+          
+      - name: Display Profiling Output
+        if: success()
+        run: |
+          echo "::group::📊 Profiling Results"
+          cat apigeelint-profile.txt
           echo "::endgroup::"
 
   Build_And_Upload_NonProd:
