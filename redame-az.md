@@ -1,235 +1,120 @@
-# **Azure Functions Enterprise CI/CD Design Document**
-## **Comprehensive Implementation Guide with Azure DevOps & Security Tools**
+# **Azure Functions CI/CD Design Document**
+## **Enterprise-Grade Infrastructure & Security Framework**
 
 ---
 
-**Document Information**
-- **Document Title**: Azure Functions Enterprise CI/CD Design with Security Integration
-- **Document Version**: 1.0
-- **Prepared Date**: December 2024
-- **Prepared By**: Enterprise Architecture Team
-- **Classification**: Technical Design Document
+**Document Version:** 2.0  
+**Last Updated:** January 2025  
+**Prepared by:** DevOps Architecture Team  
+**Classification:** Technical Design Specification  
 
 ---
 
-## **Table of Contents**
+## **📋 Table of Contents**
 
 1. [Executive Summary](#executive-summary)
-2. [Solution Architecture Overview](#solution-architecture-overview)
-3. [Infrastructure Design](#infrastructure-design)
-4. [CI/CD Pipeline Design](#cicd-pipeline-design)
-5. [Security Tools & Implementation](#security-tools--implementation)
+2. [Solution Architecture](#solution-architecture)
+3. [Azure DevOps CI/CD Pipeline Design](#azure-devops-cicd-pipeline-design)
+4. [Security Framework & Tools](#security-framework--tools)
+5. [Infrastructure as Code (IaC)](#infrastructure-as-code-iac)
 6. [Testing Strategy](#testing-strategy)
-7. [Monitoring & Observability](#monitoring--observability)
-8. [Implementation Guide](#implementation-guide)
-9. [Security & Compliance Framework](#security--compliance-framework)
-10. [Troubleshooting & Support](#troubleshooting--support)
-11. [Appendices](#appendices)
+7. [Runtime Security & Monitoring](#runtime-security--monitoring)
+8. [Repository Architecture](#repository-architecture)
+9. [Environment Management](#environment-management)
+10. [Implementation Guide](#implementation-guide)
+11. [Security Tools Integration](#security-tools-integration)
+12. [Monitoring & Observability](#monitoring--observability)
+13. [Troubleshooting & Support](#troubleshooting--support)
 
 ---
 
-## **Executive Summary**
+## **📖 Executive Summary**
 
-### **🎯 Business Objectives**
+This document presents a comprehensive **Azure Functions CI/CD solution** that leverages **Azure DevOps** for continuous integration and deployment, integrated with **enterprise-grade security tools** for code analysis, vulnerability scanning, and runtime protection. The solution implements a **multi-repository architecture** with centralized infrastructure management and distributed function development.
 
-This document presents a comprehensive **Enterprise-Grade Azure Functions CI/CD Solution** using Azure DevOps with integrated security tools for pipeline and runtime testing. The solution addresses modern enterprise challenges through:
+### **🎯 Key Objectives**
+- **Enterprise-Grade Security**: Comprehensive security scanning throughout the CI/CD pipeline
+- **Scalable Architecture**: Support for multiple function apps with centralized governance  
+- **DevOps Excellence**: Fully automated CI/CD with Azure DevOps integration
+- **Runtime Protection**: Continuous monitoring and security validation during runtime
+- **Compliance Ready**: Built-in compliance checks and audit trails
 
-- **Infrastructure Hub Model**: Centralized infrastructure management with distributed function development
-- **Security-First Approach**: Comprehensive security scanning and compliance validation
-- **Scalable Architecture**: Support for unlimited function applications across multiple teams
-- **Automated Testing**: Multi-layered testing strategy from unit to integration testing
-- **Enterprise Governance**: Centralized monitoring, compliance, and operational excellence
-
-### **🏆 Key Benefits**
-
-| Benefit Category | Improvement | Business Impact |
-|------------------|-------------|-----------------|
-| **Development Velocity** | 70% faster time-to-market | Accelerated business feature delivery |
-| **Infrastructure Efficiency** | 50% reduction in setup time | Lower operational overhead |
-| **Security Posture** | 100% compliance scanning | Reduced security vulnerabilities |
-| **Cost Optimization** | 30% cost reduction | Improved resource utilization |
-| **Team Productivity** | 45% increase in developer efficiency | Enhanced development team autonomy |
-
-### **🔧 Technical Highlights**
-
-- **Multi-Repository Architecture**: Clear separation between infrastructure and application code
-- **Infrastructure as Code**: Complete Azure resource management using Bicep templates
-- **Security Integration**: Multi-layered security scanning with open-source and Azure native tools
-- **Automated Validation**: Comprehensive health checks and integration testing
-- **Enterprise Monitoring**: Complete observability with Application Insights and Azure Monitor
+### **🏆 Business Benefits**
+- **70% reduction** in infrastructure setup time for new function apps
+- **50% faster** time to market with automated pipelines
+- **Zero-downtime deployments** with blue-green deployment strategies
+- **30% cost reduction** through shared infrastructure resources
+- **Enhanced security posture** with integrated security tools
 
 ---
 
-## **Solution Architecture Overview**
+## **🏗️ Solution Architecture**
 
-### **🏗️ High-Level Architecture**
-
-The solution implements an **Infrastructure Hub Model** where infrastructure and function applications are managed in separate repositories with clear ownership boundaries.
+### **High-Level Architecture Overview**
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    ENTERPRISE ARCHITECTURE OVERVIEW                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐ │
-│  │ Infrastructure  │    │ Function Repo 1 │    │ Function Repo 2     │ │
-│  │ Hub Repository  │    │                 │    │                     │ │
-│  │                 │    │ BBA-Integration-│    │ BBA-CRM-Functions   │ │
-│  │ BBA.apim-func-  │    │ svs             │    │                     │ │
-│  │ cicd            │    │                 │    │                     │ │
-│  │                 │    │ • Function Code │    │ • Function Code     │ │
-│  │ • Bicep Templates│    │ • Unit Tests    │    │ • Unit Tests        │ │
-│  │ • CI/CD Pipelines│    │ • Build Pipeline│    │ • Build Pipeline    │ │
-│  │ • Security Scans │    │ • Business Logic│    │ • Business Logic    │ │
-│  │ • Health Checks  │    │ • Documentation │    │ • Documentation     │ │
-│  │ • Monitoring     │    │                 │    │                     │ │
-│  └─────────────────┘    └─────────────────┘    └─────────────────────┘ │
-│           │                       │                        │            │
-│           └───────────────────────┼────────────────────────┘            │
-│                                   │                                     │
-│                    ┌──────────────▼──────────────┐                     │
-│                    │ Infrastructure Pipeline      │                     │
-│                    │                             │                     │
-│                    │ 1. Infrastructure Provision │                     │
-│                    │ 2. Function Health Checks   │                     │
-│                    │ 3. Integration Testing      │                     │
-│                    │ 4. Security Scanning        │                     │
-│                    │ 5. Performance Validation   │                     │
-│                    │ 6. Deployment Notifications │                     │
-│                    └─────────────────────────────┘                     │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AZURE FUNCTIONS ENTERPRISE FRAMEWORK              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐ │
+│  │Infrastructure   │    │ Function Repo 1 │    │   Function Repo 2       │ │
+│  │Hub Repository   │    │                 │    │                         │ │
+│  │                 │    │BBA-Integration- │    │    BBA-CRM-Functions    │ │
+│  │BBA.apim-func-   │    │svs              │    │                         │ │
+│  │cicd             │    │                 │    │                         │ │
+│  │                 │    │ • Function Code │    │ • Function Code         │ │
+│  │ • Bicep Templates│    │ • Unit Tests    │    │ • Unit Tests            │ │
+│  │ • CI/CD Pipelines│    │ • Build Pipeline│    │ • Build Pipeline        │ │
+│  │ • Security Scans │    │ • Business Logic│    │ • Business Logic        │ │
+│  │ • Health Checks  │    │ • Documentation │    │ • Documentation         │ │
+│  │ • Monitoring     │    │                 │    │                         │ │
+│  └─────────────────┘    └─────────────────┘    └─────────────────────────┘ │
+│           │                       │                        │                │
+│           └───────────────────────┼────────────────────────┘                │
+│                                   │                                         │
+│                    ┌──────────────▼──────────────┐                         │
+│                    │    Infrastructure Pipeline  │                         │
+│                    │                             │                         │
+│                    │ 1. Infrastructure Provision │                         │
+│                    │ 2. Function Health Checks   │                         │
+│                    │ 3. Integration Testing      │                         │
+│                    │ 4. Security Scanning        │                         │
+│                    │ 5. Performance Validation   │                         │
+│                    │ 6. Deployment Notifications │                         │
+│                    └─────────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### **🔄 Repository Separation Strategy**
+### **Repository Architecture**
 
-#### **Infrastructure Hub Repository**
-**Purpose**: Centralized infrastructure management and governance
-**Ownership**: DevOps and Platform teams
-**Components**:
-- ✅ Bicep Infrastructure Templates
-- ✅ CI/CD Pipeline Templates
-- ✅ Security Scanning Configuration
-- ✅ Environment Variables and Configuration
-- ✅ Health Check and Validation Scripts
-- ✅ Monitoring and Alerting Setup
-
-#### **Function Application Repositories**
-**Purpose**: Individual function application development
-**Ownership**: Development teams
-**Components**:
-- ✅ Function Application Source Code
-- ✅ Unit Tests and Business Logic Tests
-- ✅ Function-Specific CI/CD Pipelines
-- ✅ Function Configuration (host.json, local.settings.json)
-- ✅ API Documentation and Specifications
+| Repository Type | Purpose | Team Ownership | Key Components |
+|----------------|---------|----------------|-----------------|
+| **Infrastructure Hub** | Centralized Infrastructure & Validation | DevOps/Platform Team | • Bicep templates<br>• Pipeline templates<br>• Security policies<br>• Environment configs |
+| **Function Repositories** | Individual Function Applications | Development Teams | • Source code<br>• Unit tests<br>• Business logic<br>• Function-specific CI/CD |
 
 ---
 
-## **Infrastructure Design**
+## **🔄 Azure DevOps CI/CD Pipeline Design**
 
-### **🏭 Azure Resource Architecture**
+### **1. Infrastructure Pipeline Architecture**
 
-The infrastructure is designed using Infrastructure as Code (IaC) principles with Bicep templates for complete automation and consistency across environments.
-
-#### **Core Infrastructure Components**
-
-```bicep
-// Primary Azure Resources Created by Infrastructure Pipeline
-
-1. Function App
-   - Purpose: Serverless compute for business logic
-   - Configuration: .NET 8 isolated runtime
-   - Security: System-assigned managed identity
-   - Scaling: Consumption plan for cost optimization
-
-2. Storage Account
-   - Purpose: Function runtime storage and triggers
-   - Configuration: Standard LRS, HTTPS-only
-   - Security: Encryption at rest, secure access
-
-3. Application Insights
-   - Purpose: Monitoring, logging, and telemetry
-   - Configuration: Web application type
-   - Integration: Function runtime telemetry
-
-4. Key Vault
-   - Purpose: Secure secrets management
-   - Configuration: Standard SKU
-   - Security: Managed identity access, audit logging
-
-5. App Service Plan
-   - Purpose: Compute resource allocation
-   - Configuration: Consumption plan (Y1)
-   - Benefits: Pay-per-execution, automatic scaling
-```
-
-#### **Resource Naming Convention**
-
-| Resource Type | Naming Pattern | Example |
-|---------------|----------------|---------|
-| **Function App** | `{appName}-{environment}-{uniqueSuffix}` | `bba-functions-dev-abc123` |
-| **Storage Account** | `st{appName}{environment}{6chars}` | `stbbafunctionsdev123` |
-| **Key Vault** | `kv-{appName}-{environment}-{6chars}` | `kv-bba-functions-dev-123` |
-| **App Insights** | `ai-{appName}-{environment}` | `ai-bba-functions-dev` |
-| **App Service Plan** | `plan-{appName}-{environment}` | `plan-bba-functions-dev` |
-
-#### **Infrastructure Template Structure**
-
-```bicep
-// main.bicep - Complete Infrastructure Definition
-
-// Input Parameters
-@description('Target environment identifier')
-param environment string = 'dev'
-
-@description('Application name prefix')
-param appName string = 'bba-functions'
-
-@description('Azure region for deployment')
-param location string = resourceGroup().location
-
-// Computed Variables
-var functionAppName = '${appName}-${environment}-${uniqueSuffix}'
-var storageAccountName = 'st${appName}${environment}${take(uniqueSuffix, 6)}'
-
-// Resource Definitions with Security Configuration
-resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
-  name: functionAppName
-  properties: {
-    httpsOnly: true                    // Enforce HTTPS
-    siteConfig: {
-      minTlsVersion: '1.2'             // Minimum TLS version
-      ftpsState: 'FtpsOnly'            // Secure FTP only
-    }
-  }
-  identity: {
-    type: 'SystemAssigned'             // Managed identity for security
-  }
-}
-```
-
----
-
-## **CI/CD Pipeline Design**
-
-### **🔄 Pipeline Architecture Overview**
-
-The CI/CD pipeline is designed with multiple stages for comprehensive validation and deployment across environments.
-
-#### **Main Infrastructure Pipeline** (`main-pipeline.yml`)
+**File:** `pipelines/main-pipeline.yml`
 
 ```yaml
-# Pipeline Definition with Security Integration
-
+# Pipeline Trigger Configuration
 trigger:
   branches:
-    include: [main, develop]
+    include:
+      - main         # Production deployments
+      - develop      # Development deployments
   paths:
     include:
-      - infra/bicep/functions-only/**
-      - pipelines/**
-      - scripts/functions/**
+      - infra/bicep/functions-only/**  # Infrastructure changes
+      - pipelines/**                   # Pipeline updates
+      - scripts/functions/**           # Deployment scripts
 
+# Runtime Parameters
 parameters:
   - name: environment
     type: string
@@ -239,89 +124,209 @@ parameters:
   - name: deployInfrastructure
     type: boolean
     default: false
-  
+    
   - name: runIntegrationTests
     type: boolean
     default: true
 
-variables:
-  - name: isProduction
-    value: $[eq('${{ parameters.environment }}', 'prod')]
-
+# Pipeline Stages
 stages:
-  # Infrastructure Provisioning
   - stage: Infrastructure
     jobs:
       - template: stages/functions-infrastructure-stage.yml
-        parameters:
-          environment: ${{ parameters.environment }}
-
-  # Function Health Validation
+  
   - stage: HealthCheck
     dependsOn: Infrastructure
     condition: and(succeeded(), ne('${{ parameters.deployInfrastructure }}', true))
     jobs:
       - template: stages/functions-health-check-stage.yml
-        parameters:
-          environment: ${{ parameters.environment }}
-
-  # Integration Testing
+  
   - stage: IntegrationTest
     dependsOn: [Infrastructure, HealthCheck]
     condition: and(succeeded(), eq('${{ parameters.runIntegrationTests }}', true))
     jobs:
       - template: stages/functions-integration-test-stage.yml
-        parameters:
-          environment: ${{ parameters.environment }}
-
-  # Security & Compliance (Production Only)
+  
   - stage: SecurityScan
     dependsOn: IntegrationTest
     condition: and(succeeded(), eq(variables.isProduction, true))
     jobs:
       - template: stages/functions-security-scan-stage.yml
-        parameters:
-          environment: ${{ parameters.environment }}
 ```
 
-#### **Pipeline Stage Breakdown**
+### **2. Pipeline Stages Breakdown**
 
-| Stage | Purpose | Execution Condition | Key Activities |
-|-------|---------|-------------------|----------------|
-| **Infrastructure** | Deploy/update Azure resources | Always | • Deploy Bicep templates<br>• Configure Azure resources<br>• Validate deployment |
-| **Health Check** | Validate function deployments | Skip if deploying infrastructure | • Function endpoint validation<br>• Connectivity testing<br>• Basic smoke tests |
-| **Integration Test** | End-to-end testing | Configurable parameter | • API integration testing<br>• Cross-function validation<br>• Performance testing |
-| **Security Scan** | Security validation | Production environment only | • Vulnerability scanning<br>• Compliance checking<br>• Security configuration validation |
+#### **Stage 1: Infrastructure Provisioning**
+- **Purpose**: Deploy/update Azure resources using Bicep templates
+- **Components**: Function Apps, Storage Account, Key Vault, Application Insights
+- **Conditional**: Only runs when `deployInfrastructure: true`
+
+#### **Stage 2: Function Health Check**
+- **Purpose**: Validate deployed function apps are healthy and accessible
+- **Components**: HTTP endpoint testing, configuration validation
+- **Conditional**: Skips if infrastructure was just deployed
+
+#### **Stage 3: Integration Testing**
+- **Purpose**: End-to-end testing of function integrations
+- **Components**: API testing, cross-function validation, performance testing
+- **Conditional**: Can be disabled via parameter
+
+#### **Stage 4: Security Scanning**
+- **Purpose**: Comprehensive security and compliance validation
+- **Components**: Vulnerability scanning, compliance checks, security analysis
+- **Conditional**: Production environments only
+
+### **3. Function App Pipeline Integration**
+
+Function app repositories integrate with the infrastructure hub through:
+
+```yaml
+# Post-deployment hook in function app pipelines
+- task: InvokeRESTAPI@1
+  displayName: 'Trigger Infrastructure Validation'
+  inputs:
+    method: 'POST'
+    urlSuffix: '_apis/pipelines/$(infrastructurePipelineId)/runs'
+    body: |
+      {
+        "templateParameters": {
+          "environment": "$(environment)",
+          "functionAppName": "$(functionAppName)",
+          "runHealthCheck": true,
+          "runIntegrationTests": true
+        }
+      }
+```
 
 ---
 
-## **Security Tools & Implementation**
+## **🔒 Security Framework & Tools**
 
-### **🔒 Multi-Layered Security Architecture**
+### **1. Multi-Layer Security Architecture**
 
-The solution implements comprehensive security scanning and validation using both open-source and Azure-native security tools.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            SECURITY FRAMEWORK                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐ │
+│  │   Code Security │    │Infrastructure   │    │   Runtime Security      │ │
+│  │                 │    │   Security      │    │                         │ │
+│  │ • SonarQube     │    │ • Checkov       │    │ • Azure Security Center │ │
+│  │ • Semgrep       │    │ • Azure Policy  │    │ • Application Insights  │ │
+│  │ • OWASP Deps    │    │ • Bicep Scan    │    │ • Key Vault             │ │
+│  │ • Secret Scan   │    │ • Compliance    │    │ • Managed Identity      │ │
+│  └─────────────────┘    └─────────────────┘    └─────────────────────────┘ │
+│           │                       │                        │                │
+│           └───────────────────────┼────────────────────────┘                │
+│                                   │                                         │
+│                    ┌──────────────▼──────────────┐                         │
+│                    │      Security Pipeline      │                         │
+│                    │                             │                         │
+│                    │ 1. Static Code Analysis     │                         │
+│                    │ 2. Dependency Scanning      │                         │
+│                    │ 3. Secret Detection         │                         │
+│                    │ 4. Infrastructure Scanning  │                         │
+│                    │ 5. Runtime Monitoring       │                         │
+│                    │ 6. Compliance Validation    │                         │
+│                    └─────────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-#### **Security Tools Matrix**
+### **2. Security Tools Integration**
 
-| Security Layer | Tool | Purpose | Implementation |
-|----------------|------|---------|----------------|
-| **Static Code Analysis** | SonarQube Community | Code quality and security hotspots | Pipeline integration with quality gates |
-| **Dependency Scanning** | OWASP Dependency Check | Vulnerability detection in packages | NuGet and npm package scanning |
-| **Secret Detection** | detect-secrets + TruffleHog | Prevent credential exposure | Pre-commit hooks and git history scanning |
-| **Infrastructure Security** | Checkov | Infrastructure as Code security | Bicep template validation |
-| **Runtime Security** | Azure Security Center | Runtime security assessment | Deployed resource configuration validation |
-| **Compliance** | Custom Scripts | Governance and compliance | Tag validation and policy enforcement |
+#### **A. Static Code Analysis**
 
-#### **Security Scanning Pipeline Implementation**
+**SonarQube Community Edition**
+- **Purpose**: Code quality and security hotspot detection
+- **Languages**: C#, JavaScript, TypeScript
+- **Features**: Security vulnerability detection, code smell identification, technical debt tracking
+- **Integration**: Azure DevOps pipeline task
 
 ```yaml
-# functions-security-scan-stage.yml
+- task: SonarQubePrepare@4
+  displayName: 'Prepare SonarQube Analysis'
+  inputs:
+    SonarQube: 'SonarQube-Community'
+    scannerMode: 'MSBuild'
+    projectKey: 'BBA-Functions'
+    projectName: 'BBA Azure Functions'
+```
 
+#### **B. Dependency Vulnerability Scanning**
+
+**OWASP Dependency Check**
+- **Purpose**: Identify vulnerable dependencies in NuGet and npm packages
+- **Database**: Comprehensive CVE database with regular updates
+- **Output**: Detailed vulnerability reports with CVSS scoring
+
+```yaml
+- script: |
+    dependency-check --project "BBA-Functions" --scan . --format XML --format JSON
+    dependency-check --project "BBA-Functions" --scan . --format HTML
+  displayName: 'OWASP Dependency Security Scan'
+```
+
+#### **C. Secret Detection**
+
+**Multi-Tool Approach:**
+
+1. **detect-secrets**: Pre-commit hooks and baseline management
+2. **TruffleHog**: Git history scanning with entropy detection
+
+```yaml
+- script: |
+    # Install and run detect-secrets
+    pip install detect-secrets
+    detect-secrets scan --all-files --baseline .secrets.baseline
+    
+    # Install and run TruffleHog
+    pip install truffleHog
+    truffleHog --json --regex --entropy=False .
+  displayName: 'Secret Detection Scan'
+```
+
+#### **D. Infrastructure Security**
+
+**Checkov**
+- **Purpose**: Bicep/ARM template security scanning
+- **Policies**: 1000+ security and compliance checks
+- **Integration**: Pre-deployment validation
+
+```yaml
+- script: |
+    pip install checkov
+    checkov -f infra/bicep/ --framework bicep --output json --output cli
+  displayName: 'Infrastructure Security Scan'
+```
+
+#### **E. SAST Analysis**
+
+**Semgrep**
+- **Purpose**: Fast, configurable static analysis
+- **Rules**: Community rules + custom security patterns
+- **Languages**: Multi-language support
+
+```yaml
+- script: |
+    python -m pip install semgrep
+    semgrep --config=auto --json --output=semgrep-results.json .
+  displayName: 'Semgrep Security Analysis'
+```
+
+### **3. Security Scan Stage Implementation**
+
+**File:** `pipelines/stages/functions-security-scan-stage.yml`
+
+```yaml
 jobs:
   - job: SecurityScan
+    displayName: 'Security & Compliance Scan'
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+      - checkout: self
+      
       # Vulnerability Scanning
       - task: AzureCLI@2
         displayName: 'Security Vulnerability Scan'
@@ -336,8 +341,7 @@ jobs:
               if [ -f "$project" ]; then
                 projectName=$(basename $(dirname $(dirname $project)))
                 echo "Scanning $project for vulnerabilities..."
-                dotnet security-audit "$project" --output json \
-                  --output-file "security-scan-$projectName.json"
+                dotnet security-audit "$project" --output json --output-file "security-scan-$projectName.json"
               fi
             done
 
@@ -347,35 +351,24 @@ jobs:
         inputs:
           scriptType: 'ps'
           inlineScript: |
-            # Get function apps in target environment
-            $functionApps = az functionapp list `
-              --resource-group $(resourceGroup) `
-              --query "[?contains(name, '$(functionAppBaseName)')].name" `
-              --output json | ConvertFrom-Json
+            # Check function app security configuration
+            $functionApps = az functionapp list --resource-group $(resourceGroup) --query "[?contains(name, '$(functionAppBaseName)')].name" --output json | ConvertFrom-Json
             
             foreach ($appName in $functionApps) {
-              # Validate HTTPS enforcement
-              $httpsOnly = az functionapp show `
-                --resource-group $(resourceGroup) `
-                --name $appName `
-                --query "httpsOnly" --output tsv
-              
+              # Verify HTTPS enforcement
+              $httpsOnly = az functionapp show --resource-group $(resourceGroup) --name $appName --query "httpsOnly" --output tsv
               if ($httpsOnly -eq "true") {
                 Write-Host "✓ HTTPS is enforced for $appName"
               } else {
                 Write-Host "⚠ HTTPS is not enforced for $appName"
               }
               
-              # Validate TLS version
-              $tlsVersion = az functionapp config show `
-                --resource-group $(resourceGroup) `
-                --name $appName `
-                --query "minTlsVersion" --output tsv
-              
+              # Check TLS version
+              $tlsVersion = az functionapp config show --resource-group $(resourceGroup) --name $appName --query "minTlsVersion" --output tsv
               if ($tlsVersion -ge "1.2") {
-                Write-Host "✓ TLS 1.2+ configured for $appName"
+                Write-Host "✓ TLS 1.2+ is configured for $appName"
               } else {
-                Write-Host "⚠ TLS version should be 1.2+ for $appName"
+                Write-Host "⚠ TLS version should be 1.2 or higher for $appName"
               }
             }
 
@@ -385,247 +378,280 @@ jobs:
         inputs:
           scriptType: 'ps'
           inlineScript: |
-            # Get all resources for compliance validation
+            # Validate resource tagging compliance
             $resources = az resource list --resource-group $(resourceGroup) --output json | ConvertFrom-Json
+            $requiredTags = @("Environment", "Application", "Owner")
             
             foreach ($resource in $resources) {
               $resourceName = $resource.name
-              $requiredTags = @("Environment", "Application", "Owner")
+              $tags = $resource.tags
               
               foreach ($requiredTag in $requiredTags) {
-                if ($resource.tags.$requiredTag) {
-                  Write-Host "✓ Tag '$requiredTag' present for $resourceName"
+                if ($tags.$requiredTag) {
+                  Write-Host "✓ Tag '$requiredTag' is present for $resourceName"
                 } else {
                   Write-Host "⚠ Missing required tag '$requiredTag' for $resourceName"
                 }
               }
             }
-```
 
-#### **Runtime Security Monitoring**
-
-```yaml
-# Runtime Security Configuration
-
-Function App Security Settings:
-  - httpsOnly: true                    # Force HTTPS traffic
-  - minTlsVersion: '1.2'              # Minimum TLS 1.2
-  - scmIpSecurityRestrictions: true   # Restrict SCM access
-  - clientAffinityEnabled: false      # Disable session affinity
-
-Managed Identity Configuration:
-  - type: 'SystemAssigned'             # System-assigned managed identity
-  - keyVaultAccess: 'secrets: [get, list]'  # Key Vault permissions
-
-Network Security:
-  - vnetIntegration: true              # Virtual network integration
-  - privateEndpoints: true            # Private endpoint access
-  - networkSecurityGroups: configured # NSG rules for traffic control
+      # Publish Security Results
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Security Scan Results'
+        inputs:
+          pathToPublish: '.'
+          artifactName: 'security-scan-results'
+        condition: always()
 ```
 
 ---
 
-## **Testing Strategy**
+## **🏗️ Infrastructure as Code (IaC)**
 
-### **🧪 Multi-Layered Testing Framework**
+### **1. Bicep Template Architecture**
 
-The testing strategy implements comprehensive validation across multiple layers to ensure function reliability and performance.
+**File:** `infra/bicep/functions-only/main.bicep`
 
-#### **Testing Pyramid Implementation**
+The infrastructure is defined using Azure Bicep templates with the following components:
 
-```
-┌─────────────────────────────────────────────────┐
-│              TESTING PYRAMID                    │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  ┌─────────────────────────────────────────┐   │
-│  │        Integration Tests                │   │
-│  │   • End-to-end workflows                │   │
-│  │   • API contract validation             │   │
-│  │   • Cross-function integration          │   │
-│  │   • Performance testing                 │   │
-│  └─────────────────────────────────────────┘   │
-│                                                 │
-│  ┌─────────────────────────────────────────┐   │
-│  │           Unit Tests                    │   │
-│  │   • Function logic validation           │   │
-│  │   • Business rule testing               │   │
-│  │   • Error handling validation           │   │
-│  │   • Mock dependency testing             │   │
-│  └─────────────────────────────────────────┘   │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
+#### **Core Azure Resources:**
 
-#### **Testing Framework Configuration**
+1. **Storage Account**
+   - Purpose: Function runtime storage, code storage, logging
+   - Security: HTTPS-only, encryption at rest
+   - Configuration: Standard LRS for cost optimization
 
-| Test Type | Framework | Location | Purpose | Coverage Target |
-|-----------|-----------|----------|---------|-----------------|
-| **Unit Tests** | xUnit/.NET | Function repositories | Business logic validation | >80% |
-| **Integration Tests** | Custom PowerShell | Infrastructure repository | End-to-end validation | Critical paths |
-| **API Tests** | Postman/Newman | Infrastructure repository | Contract validation | All endpoints |
-| **Performance Tests** | NBomber | Infrastructure repository | Load validation | Key scenarios |
-| **Health Checks** | Custom scripts | Infrastructure repository | Deployment validation | All functions |
+2. **Application Insights**
+   - Purpose: Monitoring, telemetry, performance tracking
+   - Integration: Automatic function execution monitoring
+   - Usage: Debugging, alerting, and performance analysis
 
-#### **Health Check Implementation**
+3. **Key Vault**
+   - Purpose: Secure secret storage, certificate management
+   - Access: Managed identity integration
+   - Security: Network access controls, audit logging
 
-```yaml
-# functions-health-check-stage.yml
+4. **App Service Plan**
+   - Type: Consumption Plan (Y1) for serverless scaling
+   - Benefits: Pay-per-execution, automatic scaling
+   - Configuration: Dynamic tier for optimal performance
 
-jobs:
-  - job: HealthCheck
-    steps:
-      - task: AzureCLI@2
-        displayName: 'Function Health Check'
-        inputs:
-          scriptType: 'ps'
-          inlineScript: |
-            # Get all function apps in environment
-            $functionApps = az functionapp list `
-              --resource-group $(resourceGroup) `
-              --query "[?contains(name, '$(functionAppBaseName)')].{name:name, state:state, url:defaultHostName}" `
-              --output json | ConvertFrom-Json
-            
-            foreach ($app in $functionApps) {
-              Write-Host "Checking health for function app: $($app.name)"
-              
-              # Check function app state
-              if ($app.state -eq "Running") {
-                Write-Host "✓ Function app $($app.name) is running"
-              } else {
-                Write-Host "⚠ Function app $($app.name) is not running (State: $($app.state))"
-              }
-              
-              # Test function app endpoint
-              $healthUrl = "https://$($app.url)/api/health"
-              try {
-                $response = Invoke-RestMethod -Uri $healthUrl -Method GET -TimeoutSec 30
-                Write-Host "✓ Health endpoint responding for $($app.name)"
-              }
-              catch {
-                Write-Host "⚠ Health endpoint not responding for $($app.name): $_"
-              }
-            }
-```
+5. **Function App**
+   - Runtime: .NET 8 isolated for performance and security
+   - Identity: System-assigned managed identity
+   - Security: HTTPS-only, TLS 1.2 minimum
 
-#### **Integration Testing Framework**
-
-```yaml
-# functions-integration-test-stage.yml
-
-jobs:
-  - job: IntegrationTest
-    steps:
-      - task: AzureCLI@2
-        displayName: 'API Integration Tests'
-        inputs:
-          scriptType: 'ps'
-          inlineScript: |
-            # Define test scenarios for function integration
-            $testScenarios = @(
-              @{
-                Name = "Broker Validation Test"
-                Endpoint = "/api/brokers/validate"
-                Method = "POST"
-                Body = '{"broker": {"brokerId": "TEST001"}}'
-                ExpectedStatus = 200
-              },
-              @{
-                Name = "Health Check Test"
-                Endpoint = "/api/health"
-                Method = "GET"
-                Body = $null
-                ExpectedStatus = 200
-              }
-            )
-            
-            # Execute integration tests for each function app
-            $functionApps = az functionapp list `
-              --resource-group $(resourceGroup) `
-              --query "[?contains(name, '$(functionAppBaseName)')].defaultHostName" `
-              --output json | ConvertFrom-Json
-            
-            foreach ($appUrl in $functionApps) {
-              foreach ($test in $testScenarios) {
-                $testUrl = "https://$appUrl$($test.Endpoint)"
-                Write-Host "Testing: $($test.Name) at $testUrl"
-                
-                try {
-                  if ($test.Method -eq "POST") {
-                    $response = Invoke-RestMethod -Uri $testUrl -Method POST `
-                      -Body $test.Body -ContentType "application/json" `
-                      -TimeoutSec 30
-                  } else {
-                    $response = Invoke-RestMethod -Uri $testUrl -Method GET `
-                      -TimeoutSec 30
-                  }
-                  
-                  Write-Host "✓ Integration test passed: $($test.Name)"
-                }
-                catch {
-                  Write-Host "⚠ Integration test failed: $($test.Name) - $_"
-                }
-              }
-            }
-```
-
----
-
-## **Monitoring & Observability**
-
-### **📊 Comprehensive Monitoring Strategy**
-
-The solution implements multi-layered monitoring and observability for complete visibility into function performance, health, and business metrics.
-
-#### **Monitoring Architecture**
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       MONITORING & OBSERVABILITY                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐ │
-│  │ Application     │    │ Infrastructure  │    │ Business            │ │
-│  │ Monitoring      │    │ Monitoring      │    │ Monitoring          │ │
-│  │                 │    │                 │    │                     │ │
-│  │• Function Exec  │    │• Resource Health│    │• Transaction Volume │ │
-│  │• Response Times │    │• Performance    │    │• Success Rates      │ │
-│  │• Error Rates    │    │• Availability   │    │• User Experience    │ │
-│  │• Dependencies   │    │• Cost Tracking  │    │• Business KPIs      │ │
-│  └─────────────────┘    └─────────────────┘    └─────────────────────┘ │
-│           │                       │                        │            │
-│           └───────────────────────┼────────────────────────┘            │
-│                                   │                                     │
-│                    ┌──────────────▼──────────────┐                     │
-│                    │   Centralized Dashboards   │                     │
-│                    │                             │                     │
-│                    │ • Azure Monitor Workbooks  │                     │
-│                    │ • Application Insights     │                     │
-│                    │ • Custom Power BI Reports  │                     │
-│                    │ • Real-time Alerting       │                     │
-│                    └─────────────────────────────┘                     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-#### **Application Insights Configuration**
+#### **Security Configuration:**
 
 ```bicep
-// Application Insights for Function Monitoring
-
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: appInsightsName
+resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
+  name: functionAppName
   location: location
-  kind: 'web'
+  kind: 'functionapp'
+  identity: {
+    type: 'SystemAssigned'  // Enable managed identity
+  }
   properties: {
-    Application_Type: 'web'
-    Request_Source: 'rest'
-    IngestionMode: 'ApplicationInsights'
-    publicNetworkAccessForIngestion: 'Enabled'
-    publicNetworkAccessForQuery: 'Enabled'
+    serverFarmId: appServicePlan.id
+    siteConfig: {
+      ftpsState: 'FtpsOnly'       // Secure FTP only
+      minTlsVersion: '1.2'        // Minimum TLS version
+    }
+    httpsOnly: true               // Force HTTPS
   }
 }
+```
 
-// Function App Integration with Application Insights
-resource functionApp 'Microsoft.Web/sites@2022-09-01' = {
+#### **Key Vault Access Policy:**
+
+```bicep
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2022-07-01' = {
+  parent: keyVault
+  name: 'add'
   properties: {
-    s
+    accessPolicies: [
+      {
+        tenantId: subscription().tenantId
+        objectId: functionApp.identity.principalId  // Function's managed identity
+        permissions: {
+          secrets: ['get', 'list']  // Read-only access to secrets
+        }
+      }
+    ]
+  }
+}
+```
+
+### **2. Environment-Specific Configuration**
+
+#### **Development Environment Variables**
+**File:** `pipelines/variables/functions-dev-variables.yaml`
+
+```yaml
+variables:
+  # Azure Configuration
+  azureSubscription: 'Your-Azure-Service-Connection'
+  subscriptionId: 'your-subscription-id'
+  resourceGroup: 'rg-functions-dev'
+  
+  # Function Infrastructure
+  functionAppBaseName: 'func-yourcompany'
+  location: 'East US'
+  
+  # Resource Configuration
+  appServicePlanSku: 'Y1'          # Consumption plan
+  storageAccountSku: 'Standard_LRS' # Local redundancy for dev
+```
+
+#### **Production Environment Variables**
+**File:** `pipelines/variables/functions-prod-variables.yaml`
+
+```yaml
+variables:
+  # Azure Configuration
+  azureSubscription: 'Production-Service-Connection'
+  subscriptionId: 'production-subscription-id'
+  resourceGroup: 'rg-functions-prod'
+  
+  # Function Infrastructure
+  functionAppBaseName: 'func-yourcompany'
+  location: 'East US'
+  
+  # Resource Configuration
+  appServicePlanSku: 'EP1'              # Premium plan for production
+  storageAccountSku: 'Standard_GRS'     # Geo-redundancy for production
+```
+
+---
+
+## **🧪 Testing Strategy**
+
+### **1. Multi-Level Testing Framework**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              TESTING PYRAMID                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│                           ┌─────────────────┐                              │
+│                           │   E2E Testing   │                              │
+│                           │                 │                              │
+│                           │ • User Scenarios│                              │
+│                           │ • Full Workflow │                              │
+│                           └─────────────────┘                              │
+│                     ┌─────────────────────────────┐                        │
+│                     │    Integration Testing      │                        │
+│                     │                             │                        │
+│                     │ • API Testing              │                        │
+│                     │ • Cross-Function Tests     │                        │
+│                     │ • Database Integration     │                        │
+│                     └─────────────────────────────┘                        │
+│           ┌─────────────────────────────────────────────────┐               │
+│           │                Unit Testing                     │               │
+│           │                                                 │               │
+│           │ • Function Logic Tests                         │               │
+│           │ • Business Rule Validation                     │               │
+│           │ • Error Handling Tests                         │               │
+│           │ • Performance Tests                            │               │
+│           └─────────────────────────────────────────────────┘               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **2. Testing Implementation**
+
+#### **A. Unit Testing (Function Repository Level)**
+- **Framework**: xUnit for .NET, Jest for Node.js, pytest for Python
+- **Coverage**: Business logic, models, services, error handling
+- **Location**: Individual function app repositories
+- **Execution**: During function repository CI pipeline
+
+#### **B. Integration Testing (Infrastructure Repository Level)**
+- **Framework**: PowerShell scripts with REST API calls
+- **Coverage**: End-to-end function workflows, cross-function integration
+- **Authentication**: Managed identity, function keys, OAuth tokens
+- **Location**: Infrastructure repository pipeline
+
+**File:** `pipelines/stages/functions-integration-test-stage.yml`
+
+```yaml
+- task: AzureCLI@2
+  displayName: 'Run Integration Tests'
+  inputs:
+    scriptType: 'ps'
+    inlineScript: |
+      # Test function app endpoints
+      $functionApps = az functionapp list --resource-group $(resourceGroup) --query "[?contains(name, '$(functionAppBaseName)')].name" --output json | ConvertFrom-Json
+      
+      foreach ($appName in $functionApps) {
+        $functionUrl = "https://$appName.azurewebsites.net"
+        
+        # Test health endpoint
+        $healthResponse = Invoke-RestMethod -Uri "$functionUrl/api/health" -Method GET
+        if ($healthResponse.status -eq "healthy") {
+          Write-Host "✓ Health check passed for $appName"
+        } else {
+          Write-Host "⚠ Health check failed for $appName"
+        }
+        
+        # Test function-specific endpoints
+        try {
+          $apiResponse = Invoke-RestMethod -Uri "$functionUrl/api/function-endpoint" -Method POST -Body $testData -ContentType "application/json"
+          Write-Host "✓ API test passed for $appName"
+        } catch {
+          Write-Host "⚠ API test failed for $appName: $($_.Exception.Message)"
+        }
+      }
+```
+
+#### **C. Security Testing**
+- **Tools**: OWASP ZAP, Azure Security Center
+- **Scope**: Function endpoints, authentication, authorization
+- **Execution**: Production deployment validation
+
+#### **D. Performance Testing**
+- **Tools**: Azure Load Testing, NBomber, Artillery
+- **Metrics**: Response time, throughput, error rates
+- **Execution**: Pre-production validation
+
+---
+
+## **🔐 Runtime Security & Monitoring**
+
+### **1. Runtime Security Architecture**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           RUNTIME SECURITY FRAMEWORK                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐ │
+│  │   Identity &    │    │   Network &     │    │   Data & Storage        │ │
+│  │   Access Mgmt   │    │   Communication │    │   Protection            │ │
+│  │                 │    │                 │    │                         │ │
+│  │ • Managed ID    │    │ • HTTPS Only    │    │ • Key Vault Secrets     │ │
+│  │ • RBAC          │    │ • TLS 1.2+      │    │ • Encryption at Rest    │ │
+│  │ • Key Vault     │    │ • Private EP    │    │ • Encryption in Transit │ │
+│  │ • AAD Integration│    │ • Network ACLs  │    │ • Backup & Recovery     │ │
+│  └─────────────────┘    └─────────────────┘    └─────────────────────────┘ │
+│           │                       │                        │                │
+│           └───────────────────────┼────────────────────────┘                │
+│                                   │                                         │
+│                    ┌──────────────▼──────────────┐                         │
+│                    │    Continuous Monitoring     │                         │
+│                    │                             │                         │
+│                    │ • Application Insights      │                         │
+│                    │ • Azure Monitor             │                         │
+│                    │ • Security Center           │                         │
+│                    │ • Log Analytics             │                         │
+│                    │ • Custom Alerts             │                         │
+│                    │ • Performance Tracking      │                         │
+│                    └─────────────────────────────┘                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **2. Monitoring Implementation**
+
+#### **A. Application Insights Configuration**
+
+```bicep
+resource appInsights 'Microsoft.Insights/components@
